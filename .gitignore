@@ -1,23 +1,9 @@
-# Dependencies
 node_modules/
-
-# Environment variables and secrets
+dist/
+coverage/
 .env
 .env.*
 !.env.example
-
-# Build output
-dist/
-build/
-
-# Logs
 *.log
-npm-debug.log*
-
-# IDE and OS
-.vscode/
 .DS_Store
-Thumbs.db
-
-# Testing
-coverage/
+.vercel/

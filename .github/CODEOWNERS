@@ -1,0 +1,30 @@
+# Reemplaza @usuarioN por los usuarios reales de GitHub de cada integrante.
+# Con "Require review from Code Owners" activado en la rama protegida,
+# cada PR que toque un módulo necesita la aprobación de su responsable.
+
+# Por defecto (todo lo no listado abajo)
+*                                         @usuario1
+
+# Fase 1 - Fundamentos
+/apps/api/src/modules/auth/               @usuario1
+/apps/api/src/modules/users/              @usuario1
+/apps/api/src/shared/                     @usuario1
+/apps/api/db/                             @usuario1
+
+# Fase 2 - Núcleo (tickets)
+/apps/api/src/modules/tickets/            @usuario2
+/apps/api/src/modules/files/              @usuario2
+/apps/api/src/modules/audit/              @usuario2
+
+# Fase 3 - Conocimiento y avisos
+/apps/api/src/modules/knowledge/          @usuario3
+/apps/api/src/modules/notifications/      @usuario3
+
+# Fase 4 - IA y reportes
+/apps/api/src/modules/ai/                 @usuario4
+/apps/api/src/modules/reports/            @usuario4
+
+# Frontend, documentación y CI
+/apps/web/                                @usuario3
+/docs/                                    @usuario1 @usuario2 @usuario3 @usuario4
+/.github/                                 @usuario1
