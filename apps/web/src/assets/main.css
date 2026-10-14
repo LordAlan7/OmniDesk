@@ -1,0 +1,14 @@
+:root { font-family: system-ui, sans-serif; color: #1f2937; }
+body { margin: 0; background: #f3f4f6; }
+.topbar { display: flex; gap: 1rem; align-items: center; padding: .75rem 1.5rem; background: #111827; color: #fff; }
+.topbar a { color: #d1d5db; text-decoration: none; }
+.topbar a.router-link-active { color: #fff; font-weight: 600; }
+.topbar .spacer { flex: 1; }
+main { max-width: 56rem; margin: 2rem auto; padding: 0 1rem; }
+.card { background: #fff; border-radius: .5rem; padding: 1.5rem; box-shadow: 0 1px 3px rgb(0 0 0 / .1); }
+label { display: block; margin-top: 1rem; font-weight: 600; }
+input { width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }
+button { padding: .5rem 1rem; cursor: pointer; }
+button[disabled] { opacity: .6; cursor: progress; }
+.error { color: #b91c1c; margin-top: .5rem; }
+.info { color: #92400e; margin-top: .5rem; }
