@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
 import {
   ok,
@@ -23,6 +23,7 @@ import {
 import {
   createUser,
   getUser,
+  listAvailableRoles,
   listUsers,
   setUserRoles,
   updateUser,
@@ -30,22 +31,28 @@ import {
 
 export const usersRouter = Router();
 
-// Roles disponibles para los formularios administrativos.
+// Envía errores asíncronos al middleware de errores.
+const handle = (handler: RequestHandler): RequestHandler =>
+  (req, res, next) => {
+    Promise.resolve()
+      .then(() => handler(req, res, next))
+      .catch(next);
+  };
+
 usersRouter.get(
   '/roles',
   authenticate,
   requirePermission(PERMISSIONS.USERS_ASSIGN_ROLES),
-  (_req, res) => {
-    ok(res, [...ROLES]);
-  },
+  handle(async (_req, res) => {
+    ok(res, await listAvailableRoles());
+  }),
 );
 
-// Listar usuarios con búsqueda, filtros y paginación.
 usersRouter.get(
   '/users',
   authenticate,
   requirePermission(PERMISSIONS.USERS_READ_LIST),
-  (req, res) => {
+  handle(async (req, res) => {
     const q = paginationSchema.extend({
       search: z.string().trim().max(200).optional(),
       role: z.enum(ROLES).optional(),
@@ -53,8 +60,9 @@ usersRouter.get(
     }).parse(req.query);
 
     const search = q.search?.toLowerCase();
+    const users = await listUsers();
 
-    const items = listUsers().filter((user) => {
+    const items = users.filter((user) => {
       const matchesSearch =
         !search ||
         user.name.toLowerCase().includes(search) ||
@@ -72,26 +80,24 @@ usersRouter.get(
     });
 
     paginated(res, items, q.page, q.limit);
-  },
+  }),
 );
 
-// Consultar una cuenta.
 usersRouter.get(
   '/users/:id',
   authenticate,
   requirePermission(PERMISSIONS.USERS_READ),
-  (req, res) => {
-    ok(res, getUser(parseId(req.params.id)));
-  },
+  handle(async (req, res) => {
+    ok(res, await getUser(parseId(req.params.id)));
+  }),
 );
 
-// Crear una cuenta y asignar sus roles iniciales.
 usersRouter.post(
   '/users',
   authenticate,
   requirePermission(PERMISSIONS.USERS_CREATE),
   requirePermission(PERMISSIONS.USERS_ASSIGN_ROLES),
-  async (req, res) => {
+  handle(async (req, res) => {
     const body = createUserSchema.parse(req.body);
 
     ok(
@@ -99,10 +105,9 @@ usersRouter.post(
       await createUser(body, currentUser(req).id),
       201,
     );
-  },
+  }),
 );
 
-// Validar los campos antes de comprobar sus permisos específicos.
 usersRouter.patch(
   '/users/:id',
   authenticate,
@@ -116,9 +121,7 @@ usersRouter.patch(
       req.body.email !== undefined
     ) {
       return requirePermission(PERMISSIONS.USERS_UPDATE)(
-        req,
-        res,
-        next,
+        req, res, next,
       );
     }
 
@@ -127,9 +130,7 @@ usersRouter.patch(
   (req, res, next) => {
     if (req.body.roles !== undefined) {
       return requirePermission(PERMISSIONS.USERS_ASSIGN_ROLES)(
-        req,
-        res,
-        next,
+        req, res, next,
       );
     }
 
@@ -138,43 +139,40 @@ usersRouter.patch(
   (req, res, next) => {
     if (req.body.active !== undefined) {
       return requirePermission(PERMISSIONS.USERS_DEACTIVATE)(
-        req,
-        res,
-        next,
+        req, res, next,
       );
     }
 
     next();
   },
-  (req, res) => {
+  handle(async (req, res) => {
     const body = updateUserSchema.parse(req.body);
 
     ok(
       res,
-      updateUser(
+      await updateUser(
         parseId(req.params.id),
         body,
         currentUser(req).id,
       ),
     );
-  },
+  }),
 );
 
-// Modificar únicamente los roles.
 usersRouter.put(
   '/users/:id/roles',
   authenticate,
   requirePermission(PERMISSIONS.USERS_ASSIGN_ROLES),
-  (req, res) => {
+  handle(async (req, res) => {
     const body = setRolesSchema.parse(req.body);
 
     ok(
       res,
-      setUserRoles(
+      await setUserRoles(
         parseId(req.params.id),
         body.roles,
         currentUser(req).id,
       ),
     );
-  },
+  }),
 );

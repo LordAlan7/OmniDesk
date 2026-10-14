@@ -39,10 +39,27 @@ ticketsRouter.patch('/tickets/:id/priority', authenticate, (req, res) => {
   ok(res, service.setPriority(parseId(req.params.id), priorityId, currentUser(req)));
 });
 
-ticketsRouter.patch('/tickets/:id/assignment', authenticate, (req, res) => {
-  const { technicianId, dueDate } = assignmentSchema.parse(req.body);
-  ok(res, service.assignTechnician(parseId(req.params.id), technicianId, dueDate, currentUser(req)));
-});
+ticketsRouter.patch(
+  '/tickets/:id/assignment',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const { technicianId, dueDate } =
+        assignmentSchema.parse(req.body);
+
+      const ticket = await service.assignTechnician(
+        parseId(req.params.id),
+        technicianId,
+        dueDate,
+        currentUser(req),
+      );
+
+      ok(res, ticket);
+    } catch (cause) {
+      next(cause);
+    }
+  },
+);
 
 ticketsRouter.patch('/tickets/:id/status', authenticate, (req, res) => {
   const { status } = statusSchema.parse(req.body);

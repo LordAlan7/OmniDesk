@@ -3,9 +3,14 @@ import { Errors } from '../errors';
 import { AuthUser, Role, hasRole } from '../types';
 import { verifyAccessToken } from './jwt';
 
+type Account = AuthUser & { active: boolean };
+
 type AccountResolver = (
   id: number,
-) => (AuthUser & { active: boolean }) | undefined;
+) =>
+  | Account
+  | undefined
+  | Promise<Account | undefined>;
 
 let resolveAccount: AccountResolver | undefined;
 
@@ -15,8 +20,12 @@ export function configureAccountResolver(
   resolveAccount = resolver;
 }
 
-// Valida el token y consulta el estado actual de la cuenta.
-export const authenticate: RequestHandler = (req, _res, next) => {
+// Valida el token y obtiene el estado y roles actuales.
+export const authenticate: RequestHandler = async (
+  req,
+  _res,
+  next,
+) => {
   const header = req.header('authorization');
 
   if (!header?.startsWith('Bearer ')) {
@@ -25,22 +34,32 @@ export const authenticate: RequestHandler = (req, _res, next) => {
     );
   }
 
+  let tokenUser: AuthUser;
+
   try {
-    const tokenUser = verifyAccessToken(
+    tokenUser = verifyAccessToken(
       header.slice('Bearer '.length),
     );
+  } catch {
+    return next(
+      Errors.unauthorized('The token is invalid or has expired.'),
+    );
+  }
 
-    if (!resolveAccount) {
-      return next(
-        Errors.unauthorized('Account validation is unavailable.'),
-      );
-    }
+  if (!resolveAccount) {
+    return next(
+      new Error('Account validation is unavailable.'),
+    );
+  }
 
-    const account = resolveAccount(tokenUser.id);
+  try {
+    const account = await resolveAccount(tokenUser.id);
 
     if (!account || !account.active) {
       return next(
-        Errors.unauthorized('La cuenta no existe o está desactivada.'),
+        Errors.unauthorized(
+          'La cuenta no existe o está desactivada.',
+        ),
       );
     }
 
@@ -50,16 +69,15 @@ export const authenticate: RequestHandler = (req, _res, next) => {
       name: account.name,
       roles: [...account.roles],
     };
-  } catch {
-    return next(
-      Errors.unauthorized('The token is invalid or has expired.'),
-    );
+  } catch (cause) {
+    // Un fallo de conexión a la base de datos no es
+    // un error de contraseña o de sesión.
+    return next(cause);
   }
 
   next();
 };
 
-// Aplica los roles actuales de la cuenta.
 export const requireRole =
   (...roles: Role[]): RequestHandler =>
   (req, _res, next) => {

@@ -1,48 +1,52 @@
 import bcrypt from 'bcryptjs';
+import { env } from '../../config/env';
 import { Errors } from '../../shared/errors';
-import { Role } from '../../shared/types';
-import { recordAudit } from '../audit';
-import { usersRepository } from './users.repository';
-import { PublicUser, User } from './users.types';
+import { ROLES, Role } from '../../shared/types';
 import { invalidateUserSessions } from '../../shared/security/jwt';
-function protectLastAdministrator(
-  user: User,
-  nextActive: boolean,
-  nextRoles: Role[],
-): void {
-  const isActiveAdministrator =
-    user.active && user.roles.includes('Administrator');
+import { recordAudit } from '../audit';
+import { usersRepository as memory } from './users.repository';
+import { postgresUsersRepository as postgres } from './users.postgres.repository';
+import { PublicUser, User } from './users.types';
 
-  const remainsActiveAdministrator =
-    nextActive && nextRoles.includes('Administrator');
+const useMemory = env.nodeEnv === 'test';
 
-  if (!isActiveAdministrator || remainsActiveAdministrator) {
-    return;
-  }
-
-  const anotherActiveAdministrator = usersRepository.list().some(
-    (other) =>
-      other.id !== user.id &&
-      other.active &&
-      other.roles.includes('Administrator'),
-  );
-
-  if (!anotherActiveAdministrator) {
-    throw Errors.conflict(
-      'No se puede desactivar ni quitar el rol al último administrador activo.',
-    );
-  }
-}
+type UserPatch = {
+  name?: string;
+  email?: string;
+  roles?: Role[];
+  active?: boolean;
+};
 
 export const toPublic = (
   { passwordHash: _omit, ...rest }: User,
 ): PublicUser => rest;
 
-export const listUsers = () =>
-  usersRepository.list().map(toPublic);
+async function findInternal(id: number): Promise<User | undefined> {
+  return useMemory
+    ? memory.findById(id)
+    : postgres.findById(id);
+}
 
-export function getUser(id: number): PublicUser {
-  const user = usersRepository.findById(id);
+async function findByEmail(email: string): Promise<User | undefined> {
+  return useMemory
+    ? memory.findByEmail(email.trim().toLowerCase())
+    : postgres.findByEmail(email);
+}
+
+export async function listUsers(): Promise<PublicUser[]> {
+  const users = useMemory
+    ? memory.list()
+    : await postgres.list();
+
+  return users.map(toPublic);
+}
+
+export async function listAvailableRoles(): Promise<Role[]> {
+  return useMemory ? [...ROLES] : postgres.listRoles();
+}
+
+export async function getUser(id: number): Promise<PublicUser> {
+  const user = await findInternal(id);
 
   if (!user) throw Errors.notFound('User');
 
@@ -58,17 +62,30 @@ export async function createUser(
   },
   actorId: number,
 ): Promise<PublicUser> {
-  if (usersRepository.findByEmail(data.email)) {
-    throw Errors.conflict('Email already registered.');
+  if (await findByEmail(data.email)) {
+    throw Errors.conflict(
+      'El correo electrónico ya está registrado.',
+    );
   }
 
-  const user = usersRepository.add({
-    name: data.name,
-    email: data.email,
-    roles: data.roles,
+  const account = {
+    name: data.name.trim(),
+    email: data.email.trim().toLowerCase(),
+    roles: [...data.roles],
     active: true,
     passwordHash: await bcrypt.hash(data.password, 10),
-  });
+  };
+
+  // Revalidar después del hash para las pruebas en memoria.
+  if (useMemory && memory.findByEmail(account.email)) {
+    throw Errors.conflict(
+      'El correo electrónico ya está registrado.',
+    );
+  }
+
+  const user = useMemory
+    ? memory.add(account)
+    : await postgres.add(account);
 
   recordAudit({
     action: 'user.created',
@@ -80,55 +97,63 @@ export async function createUser(
   return toPublic(user);
 }
 
-export function updateUser(
+export async function updateUser(
   id: number,
-  patch: {
-    name?: string;
-    email?: string;
-    roles?: Role[];
-    active?: boolean;
-  },
+  patch: UserPatch,
   actorId: number,
-) {
-  const user = usersRepository.findById(id);
+): Promise<PublicUser> {
+  let updated: User;
 
-  if (!user) throw Errors.notFound('User');
+  if (useMemory) {
+    const user = memory.findById(id);
 
-  const nextEmail =
-    patch.email !== undefined
-      ? patch.email.trim().toLowerCase()
-      : user.email;
+    if (!user) throw Errors.notFound('User');
 
-  const nextRoles =
-    patch.roles !== undefined
-      ? [...patch.roles]
-      : [...user.roles];
+    const nextRoles = patch.roles ?? user.roles;
+    const nextActive = patch.active ?? user.active;
+    const nextEmail = (
+      patch.email ?? user.email
+    ).trim().toLowerCase();
 
-  const nextActive = patch.active ?? user.active;
+    const existing = memory.findByEmail(nextEmail);
 
-  // Validar todo antes de modificar la cuenta.
-  const existingUser = usersRepository.findByEmail(nextEmail);
+    if (existing && existing.id !== id) {
+      throw Errors.conflict(
+        'El correo electrónico ya está registrado.',
+      );
+    }
 
-  if (existingUser && existingUser.id !== user.id) {
-    throw Errors.conflict('El correo electrónico ya está registrado.');
+    const removesAdministrator =
+      user.active &&
+      user.roles.includes('Administrator') &&
+      (!nextActive || !nextRoles.includes('Administrator'));
+
+    if (
+      removesAdministrator &&
+      !memory.list().some(
+        (other) =>
+          other.id !== id &&
+          other.active &&
+          other.roles.includes('Administrator'),
+      )
+    ) {
+      throw Errors.conflict(
+        'No se puede desactivar ni quitar el rol al último administrador activo.',
+      );
+    }
+
+    user.name = patch.name ?? user.name;
+    user.email = nextEmail;
+    user.roles = [...nextRoles];
+    user.active = nextActive;
+    updated = user;
+  } else {
+    // PostgreSQL valida y guarda dentro de una transacción.
+    updated = await postgres.update(id, patch);
   }
 
-  protectLastAdministrator(user, nextActive, nextRoles);
-
-  const before = {
-    name: user.name,
-    email: user.email,
-    roles: [...user.roles],
-    active: user.active,
-  };
-
-  user.name = patch.name ?? user.name;
-  user.email = nextEmail;
-  user.roles = nextRoles;
-  user.active = nextActive;
-
   if (patch.active === false) {
-    invalidateUserSessions(user.id);
+    invalidateUserSessions(id);
   }
 
   recordAudit({
@@ -137,25 +162,23 @@ export function updateUser(
     entityId: id,
     actorId,
     metadata: {
-      before,
       after: {
-        name: user.name,
-        email: user.email,
-        roles: [...user.roles],
-        active: user.active,
+        name: updated.name,
+        email: updated.email,
+        roles: [...updated.roles],
+        active: updated.active,
       },
     },
   });
 
-  return toPublic(user);
+  return toPublic(updated);
 }
 
-// Valida credenciales sin exponer el hash.
 export async function verifyCredentials(
   email: string,
   password: string,
 ): Promise<PublicUser | null> {
-  const user = usersRepository.findByEmail(email);
+  const user = await findByEmail(email);
 
   if (!user || !user.active) return null;
 
@@ -164,27 +187,28 @@ export async function verifyCredentials(
   return valid ? toPublic(user) : null;
 }
 
-export const findUserById = (
+export async function findUserById(
   id: number,
-): PublicUser | undefined => {
-  const user = usersRepository.findById(id);
+): Promise<PublicUser | undefined> {
+  const user = await findInternal(id);
 
   return user ? toPublic(user) : undefined;
-};
+}
 
-export const isActiveTechnician = (id: number): boolean => {
-  const user = usersRepository.findById(id);
+export async function isActiveTechnician(
+  id: number,
+): Promise<boolean> {
+  const user = await findInternal(id);
 
-  return (
-    !!user &&
+  return !!user &&
     user.active &&
-    user.roles.includes('Technician')
-  );
-};
-export function setUserRoles(
+    user.roles.includes('Technician');
+}
+
+export async function setUserRoles(
   id: number,
   roles: Role[],
   actorId: number,
-): PublicUser {
+): Promise<PublicUser> {
   return updateUser(id, { roles }, actorId);
 }

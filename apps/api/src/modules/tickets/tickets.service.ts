@@ -114,32 +114,53 @@ export function setPriority(id: number, priorityId: number, user: AuthUser): Tic
   return ticket;
 }
 
-export function assignTechnician(
+export async function assignTechnician(
   id: number,
   technicianId: number,
   dueDate: string | undefined,
   user: AuthUser,
-): Ticket {
+): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_ASSIGN)) {
-    throw Errors.forbidden('Only service advisors can assign tickets.');
+    throw Errors.forbidden(
+      'Only service advisors can assign tickets.',
+    );
   }
+
   const ticket = getTicketForUser(id, user);
+
   if (ticket.status !== 'Open' && ticket.status !== 'Assigned') {
-    throw Errors.invalidState(`A ticket in status "${ticket.status}" cannot be (re)assigned.`);
+    throw Errors.invalidState(
+      `A ticket in status "${ticket.status}" cannot be (re)assigned.`,
+    );
   }
-  if (!isActiveTechnician(technicianId)) {
-    throw Errors.validation([{ field: 'technicianId', message: 'The user is not an active technician.' }]);
+
+  if (!(await isActiveTechnician(technicianId))) {
+    throw Errors.validation([
+      {
+        field: 'technicianId',
+        message: 'The user is not an active technician.',
+      },
+    ]);
   }
+
   const from = ticket.assignedTechnicianId;
   ticket.assignedTechnicianId = technicianId;
   ticket.dueDate = dueDate ?? ticket.dueDate;
-  const wasOpen = ticket.status === 'Open';
-  if (wasOpen) {
+
+  if (ticket.status === 'Open') {
     moveTo(ticket, 'Assigned', user);
   } else {
     repo.save(ticket);
   }
-  repo.addHistory({ ticketId: id, actorId: user.id, action: 'assigned', from, to: technicianId });
+
+  repo.addHistory({
+    ticketId: id,
+    actorId: user.id,
+    action: 'assigned',
+    from,
+    to: technicianId,
+  });
+
   recordAudit({
     action: 'ticket.assigned',
     entity: 'ticket',
@@ -147,10 +168,14 @@ export function assignTechnician(
     actorId: user.id,
     metadata: { from, to: technicianId },
   });
-  notify(technicianId, 'ticket.assigned', `Ticket #${id} was assigned to you.`, {
-    entity: 'ticket',
-    id,
-  });
+
+  notify(
+    technicianId,
+    'ticket.assigned',
+    `Ticket #${id} was assigned to you.`,
+    { entity: 'ticket', id },
+  );
+
   return ticket;
 }
 
