@@ -25,11 +25,14 @@ import {
 } from './users.service';
 
 export const usersRouter = Router();
-
+import { ROLES } from '../../shared/types';
 const adminOnly = [
   authenticate,
   requireRole('Administrator'),
 ];
+usersRouter.get('/roles', ...adminOnly, (_req, res) => {
+  ok(res, [...ROLES]);
+});
 
 // Listar usuarios con búsqueda, filtros y paginación.
 usersRouter.get('/users', ...adminOnly, (req, res) => {

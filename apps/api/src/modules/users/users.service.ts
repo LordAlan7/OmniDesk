@@ -82,58 +82,68 @@ export async function createUser(
 
 export function updateUser(
   id: number,
-  patch: { name?: string; active?: boolean },
+  patch: {
+    name?: string;
+    email?: string;
+    roles?: Role[];
+    active?: boolean;
+  },
   actorId: number,
 ) {
   const user = usersRepository.findById(id);
 
   if (!user) throw Errors.notFound('User');
 
-  protectLastAdministrator(
-    user,
-    patch.active ?? user.active,
-    user.roles,
-  );
+  const nextEmail =
+    patch.email !== undefined
+      ? patch.email.trim().toLowerCase()
+      : user.email;
 
-  Object.assign(user, patch);
+  const nextRoles =
+    patch.roles !== undefined
+      ? [...patch.roles]
+      : [...user.roles];
+
+  const nextActive = patch.active ?? user.active;
+
+  // Validar todo antes de modificar la cuenta.
+  const existingUser = usersRepository.findByEmail(nextEmail);
+
+  if (existingUser && existingUser.id !== user.id) {
+    throw Errors.conflict('El correo electrónico ya está registrado.');
+  }
+
+  protectLastAdministrator(user, nextActive, nextRoles);
+
+  const before = {
+    name: user.name,
+    email: user.email,
+    roles: [...user.roles],
+    active: user.active,
+  };
+
+  user.name = patch.name ?? user.name;
+  user.email = nextEmail;
+  user.roles = nextRoles;
+  user.active = nextActive;
 
   if (patch.active === false) {
-  invalidateUserSessions(user.id);
-}
+    invalidateUserSessions(user.id);
+  }
 
   recordAudit({
     action: 'user.updated',
     entity: 'user',
     entityId: id,
     actorId,
-    metadata: patch,
-  });
-
-  return toPublic(user);
-}
-
-export function setUserRoles(
-  id: number,
-  roles: Role[],
-  actorId: number,
-) {
-  const user = usersRepository.findById(id);
-
-  if (!user) throw Errors.notFound('User');
-
-  protectLastAdministrator(user, user.active, roles);
-
-  const before = [...user.roles];
-  user.roles = [...roles];
-
-  recordAudit({
-    action: 'user.roles_changed',
-    entity: 'user',
-    entityId: id,
-    actorId,
     metadata: {
       before,
-      after: [...roles],
+      after: {
+        name: user.name,
+        email: user.email,
+        roles: [...user.roles],
+        active: user.active,
+      },
     },
   });
 
@@ -171,3 +181,10 @@ export const isActiveTechnician = (id: number): boolean => {
     user.roles.includes('Technician')
   );
 };
+export function setUserRoles(
+  id: number,
+  roles: Role[],
+  actorId: number,
+): PublicUser {
+  return updateUser(id, { roles }, actorId);
+}
