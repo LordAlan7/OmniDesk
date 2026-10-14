@@ -2,8 +2,14 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { env } from './config/env';
-import { errorHandler, notFoundHandler } from './shared/middleware/errorHandler';
+import {
+  errorHandler,
+  notFoundHandler,
+} from './shared/middleware/errorHandler';
 import { requestId } from './shared/middleware/requestId';
+import {
+  configureAccountResolver,
+} from './shared/security/guards';
 
 import { aiRouter } from './modules/ai';
 import { auditRouter } from './modules/audit';
@@ -13,9 +19,14 @@ import { knowledgeRouter } from './modules/knowledge';
 import { notificationsRouter } from './modules/notifications';
 import { reportsRouter } from './modules/reports';
 import { ticketsRouter } from './modules/tickets';
-import { usersRouter } from './modules/users';
+import {
+  usersRouter,
+  findUserById,
+} from './modules/users';
 
 export function createApp() {
+  configureAccountResolver(findUserById);
+
   const app = express();
 
   app.disable('x-powered-by');
@@ -25,11 +36,16 @@ export function createApp() {
   app.use(requestId);
 
   const api = express.Router();
+
   api.get('/health', (_req, res) => {
-    res.json({ data: { status: 'ok', service: 'omnidesk-api' } });
+    res.json({
+      data: {
+        status: 'ok',
+        service: 'omnidesk-api',
+      },
+    });
   });
 
-  // Cada módulo aporta su router. El orden no importa: no comparten rutas.
   api.use(authRouter);
   api.use(usersRouter);
   api.use(ticketsRouter);
@@ -43,5 +59,6 @@ export function createApp() {
   app.use('/api/v1', api);
   app.use(notFoundHandler);
   app.use(errorHandler);
+
   return app;
 }
