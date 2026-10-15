@@ -1,16 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { apiRequest, clearToken, setToken } from '../services/api'
+import { apiRequest, setToken } from '../services/api'
+import { clearSession } from '../services/session'
 
 interface LoginResponse {
   accessToken: string
-  user: {
-    id: number
-    name: string
-    email: string
-    roles: string[]
-  }
 }
 
 const router = useRouter()
@@ -24,7 +19,7 @@ async function login() {
 
   error.value = ''
   loading.value = true
-  clearToken()
+  clearSession()
 
   try {
     const response = await apiRequest<LoginResponse>('/auth/login', {
@@ -35,17 +30,16 @@ async function login() {
       }),
     })
 
-    if (!response.data.user.roles.includes('Administrator')) {
-      error.value = 'Tu cuenta no tiene permiso para administrar usuarios.'
-      return
-    }
-
     setToken(response.data.accessToken)
     password.value = ''
+
+    // El router consulta /auth/me y valida users:read:list.
     await router.replace('/users')
   } catch (cause) {
     error.value =
-      cause instanceof Error ? cause.message : 'No se pudo iniciar sesión.'
+      cause instanceof Error
+        ? cause.message
+        : 'No se pudo iniciar sesión.'
   } finally {
     loading.value = false
   }
@@ -56,9 +50,10 @@ async function login() {
   <main class="login-page">
     <section class="login-card">
       <div class="brand">OmniDesk</div>
-      <h1>Administración de usuarios</h1>
+      <h1>Gestión de usuarios</h1>
+
       <p class="description">
-        Inicia sesión con una cuenta de administrador.
+        Inicia sesión con tu cuenta. El acceso depende de tus permisos.
       </p>
 
       <form :aria-busy="loading" @submit.prevent="login">
@@ -145,7 +140,6 @@ label {
 
 input {
   width: 100%;
-  box-sizing: border-box;
   padding: 12px;
   border: 1px solid #b7c3d4;
   border-radius: 8px;

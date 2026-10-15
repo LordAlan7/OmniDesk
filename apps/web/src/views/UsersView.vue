@@ -1,7 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import {
+  computed,
+  onMounted,
+  onUnmounted,
+  ref,
+} from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { ApiError, clearToken } from '../services/api'
+import { ApiError } from '../services/api'
+import {
+  clearSession,
+  hasEveryPermission,
+  hasPermission,
+  refreshSession,
+} from '../services/session'
 import {
   listUsers,
   setUserStatus,
@@ -38,9 +49,36 @@ const busy = computed(
   () => loading.value || changingStatus.value,
 )
 
+const canRead = computed(
+  () => hasPermission('users:read:list'),
+)
+
+const canCreate = computed(() =>
+  hasEveryPermission('users:create', 'users:assign:roles'),
+)
+
+const canEdit = computed(() =>
+  hasEveryPermission(
+    'users:read',
+    'users:update',
+    'users:assign:roles',
+  ),
+)
+
+const canChangeStatus = computed(
+  () => hasPermission('users:deactivate'),
+)
+
+const hasActions = computed(
+  () => canEdit.value || canChangeStatus.value,
+)
+
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(total.value / limit)),
 )
+
+let refreshTimer: ReturnType<typeof setInterval> | undefined
+let disposed = false
 
 function getFilters() {
   return {
@@ -55,14 +93,66 @@ function getFilters() {
   }
 }
 
+function discardUsers() {
+  users.value = []
+  total.value = 0
+}
+
+async function checkAccess(): Promise<boolean> {
+  const user = await refreshSession()
+
+  if (disposed) return false
+
+  if (!user) {
+    discardUsers()
+    await router.replace('/login')
+    return false
+  }
+
+  if (!hasPermission('users:read:list')) {
+    discardUsers()
+    await router.replace('/access-denied')
+    return false
+  }
+
+  return true
+}
+
+async function handleAccessError(cause: unknown): Promise<boolean> {
+  if (!(cause instanceof ApiError)) return false
+
+  if (cause.status === 401) {
+    discardUsers()
+    clearSession()
+    await router.replace('/login')
+    return true
+  }
+
+  if (cause.status === 403) {
+    discardUsers()
+    await refreshSession()
+    await router.replace('/access-denied')
+    return true
+  }
+
+  return false
+}
+
 async function loadUsers() {
-  if (loading.value) return
+  if (loading.value || disposed) return
 
   loading.value = true
   loadError.value = ''
 
+  // Retirar el contenido anterior mientras se comprueba el acceso.
+  discardUsers()
+
   try {
+    if (!(await checkAccess())) return
+
     const response = await listUsers(getFilters())
+
+    if (disposed) return
 
     users.value = response.data
     total.value = response.meta?.total ?? response.data.length
@@ -72,16 +162,20 @@ async function loadUsers() {
 
       const adjusted = await listUsers(getFilters())
 
+      if (disposed) return
+
       users.value = adjusted.data
       total.value = adjusted.meta?.total ?? adjusted.data.length
     }
   } catch (cause) {
-    users.value = []
-    total.value = 0
+    if (disposed) return
 
-    if (cause instanceof ApiError && cause.status === 401) {
-      await router.replace('/login')
-      return
+    discardUsers()
+
+    try {
+      if (await handleAccessError(cause)) return
+    } catch {
+      // Mostrar el error sin restaurar información protegida.
     }
 
     loadError.value =
@@ -127,16 +221,7 @@ function changePage(nextPage: number) {
 }
 
 async function toggleStatus(user: User) {
-  if (busy.value) return
-
-  const nextActive = !user.active
-  const action = nextActive ? 'activar' : 'desactivar'
-
-  const confirmed = window.confirm(
-    `¿Deseas ${action} la cuenta de ${user.name} (${user.email})?`,
-  )
-
-  if (!confirmed) return
+  if (busy.value || !canChangeStatus.value) return
 
   changingStatus.value = true
   changingUserId.value = user.id
@@ -144,6 +229,24 @@ async function toggleStatus(user: User) {
   success.value = ''
 
   try {
+    // Revalidar permisos antes de modificar la cuenta.
+    if (!(await checkAccess())) return
+
+    if (!hasPermission('users:deactivate')) {
+      actionError.value =
+        'Ya no tienes permiso para cambiar el estado de las cuentas.'
+      return
+    }
+
+    const nextActive = !user.active
+    const action = nextActive ? 'activar' : 'desactivar'
+
+    const confirmed = window.confirm(
+      `¿Deseas ${action} la cuenta de ${user.name} (${user.email})?`,
+    )
+
+    if (!confirmed) return
+
     await setUserStatus(user.id, nextActive)
 
     success.value = `La cuenta de ${user.name} se ${
@@ -152,15 +255,16 @@ async function toggleStatus(user: User) {
 
     await loadUsers()
   } catch (cause) {
-    if (cause instanceof ApiError && cause.status === 401) {
-      await router.replace('/login')
-      return
+    try {
+      if (await handleAccessError(cause)) return
+    } catch {
+      discardUsers()
     }
 
     actionError.value =
       cause instanceof Error
         ? cause.message
-        : 'No se pudo cambiar el estado de la cuenta.'
+        : 'No se pudo cambiar el estado.'
   } finally {
     changingStatus.value = false
     changingUserId.value = null
@@ -170,11 +274,40 @@ async function toggleStatus(user: User) {
 async function logout() {
   if (busy.value) return
 
-  clearToken()
+  discardUsers()
+  clearSession()
   await router.replace('/login')
 }
 
-onMounted(loadUsers)
+function revalidateWhenVisible() {
+  if (
+    !disposed &&
+    !busy.value &&
+    document.visibilityState === 'visible'
+  ) {
+    void loadUsers()
+  }
+}
+
+onMounted(() => {
+  void loadUsers()
+
+  window.addEventListener('focus', revalidateWhenVisible)
+
+  // Detectar cambios de permisos mientras la pantalla está abierta.
+  refreshTimer = setInterval(revalidateWhenVisible, 30000)
+})
+
+onUnmounted(() => {
+  disposed = true
+  discardUsers()
+
+  window.removeEventListener('focus', revalidateWhenVisible)
+
+  if (refreshTimer !== undefined) {
+    clearInterval(refreshTimer)
+  }
+})
 </script>
 
 <template>
@@ -188,7 +321,7 @@ onMounted(loadUsers)
 
       <div class="header-actions">
         <RouterLink
-          v-if="!busy"
+          v-if="canCreate && !busy"
           class="create-link"
           to="/users/new"
         >
@@ -206,7 +339,11 @@ onMounted(loadUsers)
     </header>
 
     <section class="card" :aria-busy="busy">
-      <form class="filters" @submit.prevent="applyFilters">
+      <form
+        v-if="canRead"
+        class="filters"
+        @submit.prevent="applyFilters"
+      >
         <div class="field">
           <label for="search">Buscar</label>
           <input
@@ -234,11 +371,7 @@ onMounted(loadUsers)
 
         <div class="field">
           <label for="active">Estado</label>
-          <select
-            id="active"
-            v-model="active"
-            :disabled="busy"
-          >
+          <select id="active" v-model="active" :disabled="busy">
             <option value="">Todos los estados</option>
             <option value="true">Activo</option>
             <option value="false">Inactivo</option>
@@ -268,14 +401,10 @@ onMounted(loadUsers)
       </p>
 
       <p v-if="loading" role="status">
-        Cargando usuarios…
+        Comprobando acceso y cargando usuarios…
       </p>
 
-      <div
-        v-else-if="loadError"
-        class="error"
-        role="alert"
-      >
+      <div v-else-if="loadError" class="error" role="alert">
         <p>{{ loadError }}</p>
         <button
           class="secondary"
@@ -286,95 +415,95 @@ onMounted(loadUsers)
         </button>
       </div>
 
-      <p v-else-if="users.length === 0">
-        No se encontraron usuarios con estos criterios.
-      </p>
+      <template v-else-if="canRead">
+        <p v-if="users.length === 0">
+          No se encontraron usuarios con estos criterios.
+        </p>
 
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Nombre</th>
-              <th scope="col">Correo electrónico</th>
-              <th scope="col">Roles</th>
-              <th scope="col">Estado</th>
-              <th scope="col">Acciones</th>
-            </tr>
-          </thead>
+        <div v-else class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Nombre</th>
+                <th scope="col">Correo electrónico</th>
+                <th scope="col">Roles</th>
+                <th scope="col">Estado</th>
+                <th v-if="hasActions" scope="col">Acciones</th>
+              </tr>
+            </thead>
 
-          <tbody>
-            <tr v-for="user in users" :key="user.id">
-              <td>{{ user.name }}</td>
-              <td>{{ user.email }}</td>
-              <td>{{ user.roles.join(', ') }}</td>
+            <tbody>
+              <tr v-for="user in users" :key="user.id">
+                <td>{{ user.name }}</td>
+                <td>{{ user.email }}</td>
+                <td>{{ user.roles.join(', ') }}</td>
 
-              <td>
-                <span
-                  class="badge"
-                  :class="user.active ? 'active' : 'inactive'"
-                >
-                  {{ user.active ? 'Activo' : 'Inactivo' }}
-                </span>
-              </td>
-
-              <td>
-                <div class="row-actions">
-                  <RouterLink
-                    v-if="!busy"
-                    class="edit-link"
-                    :to="`/users/${user.id}/edit`"
-                    :aria-label="`Editar a ${user.name}`"
+                <td>
+                  <span
+                    class="badge"
+                    :class="user.active ? 'active' : 'inactive'"
                   >
-                    Editar
-                  </RouterLink>
+                    {{ user.active ? 'Activo' : 'Inactivo' }}
+                  </span>
+                </td>
 
-                  <button
-                    class="secondary"
-                    :disabled="busy"
-                    :aria-label="`${user.active ? 'Desactivar' : 'Activar'} a ${user.name}`"
-                    @click="toggleStatus(user)"
-                  >
-                    {{
-                      changingUserId === user.id
-                        ? 'Guardando…'
-                        : user.active
-                          ? 'Desactivar'
-                          : 'Activar'
-                    }}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                <td v-if="hasActions">
+                  <div class="row-actions">
+                    <RouterLink
+                      v-if="canEdit && !busy"
+                      class="edit-link"
+                      :to="`/users/${user.id}/edit`"
+                      :aria-label="`Editar a ${user.name}`"
+                    >
+                      Editar
+                    </RouterLink>
 
-      <footer
-        v-if="!loadError && !loading"
-        class="pagination"
-      >
-        <span>
-          {{ total }} usuarios · Página {{ page }} de {{ totalPages }}
-        </span>
-
-        <div class="pagination-buttons">
-          <button
-            class="secondary"
-            :disabled="busy || page <= 1"
-            @click="changePage(page - 1)"
-          >
-            Anterior
-          </button>
-
-          <button
-            class="secondary"
-            :disabled="busy || page >= totalPages"
-            @click="changePage(page + 1)"
-          >
-            Siguiente
-          </button>
+                    <button
+                      v-if="canChangeStatus"
+                      class="secondary"
+                      :disabled="busy"
+                      :aria-label="`${user.active ? 'Desactivar' : 'Activar'} a ${user.name}`"
+                      @click="toggleStatus(user)"
+                    >
+                      {{
+                        changingUserId === user.id
+                          ? 'Guardando…'
+                          : user.active
+                            ? 'Desactivar'
+                            : 'Activar'
+                      }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </footer>
+
+        <footer class="pagination">
+          <span>
+            {{ total }} usuarios · Página {{ page }} de {{ totalPages }}
+          </span>
+
+          <div class="pagination-buttons">
+            <button
+              class="secondary"
+              :disabled="busy || page <= 1"
+              @click="changePage(page - 1)"
+            >
+              Anterior
+            </button>
+
+            <button
+              class="secondary"
+              :disabled="busy || page >= totalPages"
+              @click="changePage(page + 1)"
+            >
+              Siguiente
+            </button>
+          </div>
+        </footer>
+      </template>
     </section>
   </main>
 </template>
@@ -480,13 +609,9 @@ button,
   white-space: nowrap;
 }
 
-.edit-link {
-  border: 1px solid #2457d6;
-  background: white;
-  color: #2457d6;
-}
-
+.edit-link,
 button.secondary {
+  border: 1px solid #2457d6;
   background: white;
   color: #2457d6;
 }
@@ -499,8 +624,7 @@ button:disabled {
 input:focus,
 select:focus,
 button:focus-visible,
-.create-link:focus-visible,
-.edit-link:focus-visible {
+a:focus-visible {
   outline: 2px solid #2457d6;
   outline-offset: 2px;
 }
@@ -534,7 +658,8 @@ th {
   font-weight: 600;
 }
 
-.active {
+.active,
+.success {
   color: #17663a;
   background: #e7f6ed;
 }
@@ -569,11 +694,6 @@ th {
 .error {
   color: #a52121;
   background: #fff0f0;
-}
-
-.success {
-  color: #17663a;
-  background: #e7f6ed;
 }
 
 @media (max-width: 600px) {

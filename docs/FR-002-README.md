@@ -1,81 +1,64 @@
 # FR-002 — Gestión de usuarios y técnicos
 
-**Proyecto:** OmniDesk  
-**Responsable:** Mariana Nuñez de la Hoya  
-**Rama de trabajo:** `mariana`
+**Proyecto:** OmniDesk
+**Responsable:** Mariana Nuñez de la Hoya
+**Apoyo:** César Alexis Meza Martínez
+**Validación QA:** Edgar Alan Meráz Casas
+**Rama:** mariana
 
-## Descripción
+## Estado de entrega
 
-Módulo para administrar cuentas de empleados y técnicos: consultar,
-crear, editar, asignar roles y activar o desactivar su acceso.
+Implementación y pruebas de desarrollo realizadas.
+Pendiente de revisión y aprobación formal de QA.
 
-Utiliza Vue con TypeScript, Node.js/Express y PostgreSQL.
-Integra los controles de autorización de NFR-001 desde la rama `edgar`.
+## Alcance implementado
 
-## Funcionalidades implementadas
-
-- Inicio de sesión administrativo.
-- Listado de usuarios y técnicos.
-- Búsqueda por nombre o correo electrónico.
-- Filtros por rol y estado.
-- Paginación.
-- Creación de cuentas con uno o varios roles.
+- Listado de cuentas con búsqueda, filtros por rol y estado, y paginación.
+- Creación de usuarios con uno o varios roles.
 - Consulta y edición de nombre, correo y roles.
-- Confirmación antes de modificar roles o estado.
-- Activación y desactivación sin eliminar la cuenta.
-- Protección del último administrador activo.
-- Consulta de roles desde la API.
+- Confirmación para cambios de roles y activación o desactivación.
+- Técnicos identificados mediante el rol Technician en la misma cuenta.
+- Persistencia de usuarios y asociaciones de roles en PostgreSQL.
+- Validación de campos, correos únicos y roles válidos sin duplicados.
 - Contraseñas almacenadas como hash mediante bcrypt.
-- Validación de correos únicos y roles válidos.
-- Persistencia de cuentas y roles en PostgreSQL.
-- Transacciones para crear y actualizar usuarios.
-- Comprobación del estado y los roles actuales en solicitudes protegidas.
-- Invalidación de sesiones al desactivar cuentas.
-- Indicadores de carga, mensajes de error y confirmaciones de éxito.
+- Transacciones para altas y actualizaciones.
+- Protección del último administrador activo.
+- Autorización centralizada integrada con NFR-001.
+- Navegación y acciones de Vue según permisos efectivos.
+- Revisión de permisos en formularios antes de guardar, al recuperar
+  el foco de la ventana y cada 30 segundos mientras están visibles.
+- Retirada del formulario cuando se detecta pérdida de acceso.
+- Conservación de campos ante errores ordinarios de guardado.
+- Invalidación de sesiones al desactivar una cuenta.
+- Registro de cambios administrativos mediante el módulo de auditoría.
 
-Un técnico utiliza una cuenta de usuario con el rol `Technician`.
-El estado activo no representa disponibilidad para recibir tickets.
+Una cuenta activa no representa disponibilidad para recibir tickets.
+La disponibilidad corresponde a FR-007.
 
 ## Tecnologías
 
-- Vue y TypeScript.
-- Vue Router.
-- Node.js y Express.
+Vue con TypeScript, Vue Router, Node.js, Express, PostgreSQL 17,
+JWT, bcrypt, Zod, Jest, Supertest y Cypress.
+
+## Requisitos locales
+
+- Node.js compatible con las versiones indicadas en package.json.
 - PostgreSQL 17.
-- JWT y bcrypt.
-- Zod.
-- Jest y Supertest.
-- Cypress configurado en el frontend; ejecución pendiente.
+- npm.
+- Ejecutar los comandos desde la raíz del repositorio.
 
-## Configuración local de PostgreSQL
-
-Estos datos corresponden exclusivamente al entorno local de desarrollo:
-
-| Dato | Valor |
-|---|---|
-| Servidor | localhost |
-| Puerto | 5432 |
-| Base de datos | omnidesk |
-| Usuario | postgres |
-| Contraseña local | 123456789 |
-
-No utilizar esta contraseña en producción ni en servicios expuestos.
-Si este README se comparte, la contraseña deja de ser privada.
-
-## Instalación de dependencias
-
-Desde la raíz del repositorio:
+## Instalación
 
 ```powershell
 git switch mariana
 npm install
 ```
 
-## Variables de entorno
+## Configuración del backend
 
-### Backend: `apps/api/.env`
+Crear apps/api/.env:
 
-```env
+```dotenv
 NODE_ENV=development
 PORT=3000
 CORS_ORIGIN=http://localhost:5173
@@ -85,239 +68,306 @@ DATABASE_URL=postgresql://postgres:123456789@localhost:5432/omnidesk
 OPENAI_API_KEY=
 ```
 
-Definir un valor local para `JWT_SECRET`.
+El archivo .env está excluido de Git.
 
-El archivo `.env` está excluido de Git y no debe subirse al repositorio.
+Datos del entorno local de desarrollo:
 
-### Frontend: `apps/web/.env`
+| Dato | Valor |
+|---|---|
+| Servidor | localhost |
+| Puerto | 5432 |
+| Usuario PostgreSQL | postgres |
+| Contraseña PostgreSQL local | 123456789 |
+| Base de desarrollo | omnidesk |
+| Base de pruebas | omnidesk_test |
 
-```env
+Estos valores son de desarrollo local y no deben reutilizarse en producción.
+Cada integrante debe ajustar la conexión a su instalación.
+
+## Configuración del frontend
+
+Crear apps/web/.env:
+
+```dotenv
 VITE_API_URL=http://localhost:3000/api/v1
 ```
 
-## Preparación de la base de datos
+## Preparación de PostgreSQL
 
-Los siguientes comandos utilizan la instalación predeterminada de
-PostgreSQL 17 en Windows.
-
-### Crear la base de datos
+Ejecutar estos comandos una sola vez para una base nueva:
 
 ```powershell
 & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -h localhost -p 5432 -U postgres -d postgres -W -c "CREATE DATABASE omnidesk;"
-```
 
-Cuando solicite la contraseña, introducir la contraseña local de PostgreSQL.
-
-### Ejecutar el esquema inicial
-
-Ejecutar una vez en una base nueva:
-
-```powershell
 & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -h localhost -p 5432 -U postgres -d omnidesk -W -v ON_ERROR_STOP=1 -f "apps/api/db/migrations/001_init.sql"
-```
 
-### Ejecutar la migración de usuarios
-
-```powershell
 & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -h localhost -p 5432 -U postgres -d omnidesk -W -v ON_ERROR_STOP=1 -f "apps/api/db/migrations/002_users_constraints.sql"
 ```
 
-Esta migración incorpora los roles y un índice único para el correo
-normalizado.
+Las tablas utilizadas por FR-002 son users, roles y user_roles.
+La migración 002 incorpora los roles y la unicidad del correo normalizado.
 
-### Tablas utilizadas
+## Cuentas de demostración
 
-- `users`: cuentas, estado y hash de contraseña.
-- `roles`: catálogo de roles.
-- `user_roles`: asociaciones de usuarios y roles.
-
-## Crear cuentas de demostración
-
-Desde la raíz del proyecto:
+Preparar las cuentas:
 
 ```powershell
 npm exec -w apps/api -- tsx src/scripts/seed-users.ts
 ```
 
-El script funciona únicamente en desarrollo y conserva las cuentas
-existentes sin sobrescribirlas.
+El script conserva las cuentas existentes sin sobrescribirlas.
 
-## Usuarios y contraseñas de demostración
+Contraseña inicial de las cuentas creadas por el script: `ChangeMe123!`.
 
-La contraseña inicial de todas las cuentas creadas por el script es:
+| Correo | Rol |
+|---|---|
+| employee@company.com | Employee |
+| technician@company.com | Technician |
+| advisor@company.com | Service Advisor |
+| manager@company.com | Manager |
+| admin@company.com | Administrator |
 
-```text
-ChangeMe123!
-```
+Para administrar cuentas, entrar con admin@company.com.
 
-| Correo de acceso | Rol | Contraseña inicial |
-|---|---|---|
-| employee@company.com | Employee | ChangeMe123! |
-| technician@company.com | Technician | ChangeMe123! |
-| advisor@company.com | Service Advisor | ChangeMe123! |
-| manager@company.com | Manager | ChangeMe123! |
-| admin@company.com | Administrator | ChangeMe123! |
+La contraseña de la aplicación es independiente de la de PostgreSQL.
 
-Estas cuentas son exclusivamente de demostración.
+## Ejecución normal
 
-### Acceso a la administración
-
-```text
-Correo: admin@company.com
-Contraseña: ChangeMe123!
-```
-
-La contraseña de OmniDesk es diferente de la contraseña de PostgreSQL.
-
-## Ejecutar la aplicación
-
-Abrir dos terminales desde la raíz del repositorio.
-
-### Backend
+En una terminal:
 
 ```powershell
+$env:CORS_ORIGIN = "http://localhost:5173"
 npm run dev:api
 ```
 
-API: http://localhost:3000/api/v1
-
-Comprobación del servicio:
-
-http://localhost:3000/api/v1/health
-
-### Frontend
+En otra terminal:
 
 ```powershell
 npm run dev -w apps/web
 ```
 
-Aplicación:
+- Aplicación: http://localhost:5173/login
+- API: http://localhost:3000/api/v1
+- Salud: http://localhost:3000/api/v1/health
 
-http://localhost:5173
-
-Inicio de sesión:
-
-http://localhost:5173/login
+La variable CORS_ORIGIN de la terminal tiene prioridad sobre el archivo .env.
 
 ## Pantallas
 
 | Ruta | Función |
 |---|---|
-| `/login` | Inicio de sesión |
-| `/users` | Listado, búsqueda y filtros |
-| `/users/new` | Creación de cuentas |
-| `/users/:id/edit` | Consulta y edición |
+| /login | Inicio de sesión |
+| /users | Listado, búsqueda, filtros y estado |
+| /users/new | Creación de cuentas |
+| /users/:id/edit | Consulta y edición |
+| /access-denied | Acceso denegado o verificación no disponible |
 
 ## API
 
-Todas las rutas utilizan el prefijo `/api/v1`.
+Todas las rutas utilizan el prefijo /api/v1.
 
 | Método | Ruta | Operación |
 |---|---|---|
-| POST | `/auth/login` | Iniciar sesión |
-| GET | `/auth/me` | Consultar perfil actual |
-| POST | `/auth/logout` | Registrar cierre de sesión |
-| GET | `/roles` | Consultar roles para formularios |
-| GET | `/users` | Listar usuarios |
-| GET | `/users/:id` | Consultar una cuenta |
-| POST | `/users` | Crear una cuenta |
-| PATCH | `/users/:id` | Actualizar datos, roles o estado |
-| PUT | `/users/:id/roles` | Actualizar únicamente roles |
+| POST | /auth/login | Iniciar sesión |
+| GET | /auth/me | Consultar identidad y permisos vigentes |
+| POST | /auth/logout | Registrar cierre de sesión |
+| GET | /roles | Consultar roles para formularios |
+| GET | /users | Listar usuarios |
+| GET | /users/:id | Consultar una cuenta |
+| POST | /users | Crear una cuenta |
+| PATCH | /users/:id | Actualizar datos, roles o estado |
+| PUT | /users/:id/roles | Cambiar roles |
 
-Ejemplo de búsqueda y filtros:
+Ejemplo:
 
 ```text
 /api/v1/users?search=demo&role=Technician&active=true&page=1&limit=10
 ```
 
-Las solicitudes protegidas requieren:
+Las rutas protegidas requieren Authorization: Bearer <TOKEN>.
+Las respuestas públicas excluyen contraseñas y hashes.
 
-```text
-Authorization: Bearer <TOKEN>
-```
+## Matriz de permisos aplicada
 
-## Control de permisos
+Se reutiliza shared/authorization y la matriz de NFR-001.
+Los permisos de varios roles se combinan mediante unión.
 
-Se reutiliza la autorización centralizada de NFR-001.
+| Operación | Administrator | Manager | Service Advisor | Employee / Technician |
+|---|---|---|---|---|
+| Listar cuentas | Sí | Sí | Sí | No |
+| Consultar detalle | Sí | Sí | No | No |
+| Crear cuentas | Sí | No | No | No |
+| Editar datos | Sí | No | No | No |
+| Asignar roles | Sí | No | No | No |
+| Activar o desactivar | Sí | No | No | No |
 
 | Acción | Permiso |
 |---|---|
-| Listar usuarios | `users:read:list` |
-| Consultar una cuenta | `users:read` |
-| Crear una cuenta | `users:create` y `users:assign:roles` |
-| Editar nombre o correo | `users:update` |
-| Cambiar roles | `users:assign:roles` |
-| Activar o desactivar | `users:deactivate` |
-| Consultar roles para formularios | `users:assign:roles` |
+| Listar | users:read:list |
+| Consultar detalle | users:read |
+| Crear | users:create y users:assign:roles |
+| Editar nombre o correo | users:update |
+| Cambiar roles | users:assign:roles |
+| Activar o desactivar | users:deactivate |
+| Consultar catálogo de roles | users:assign:roles |
 
-Si un PATCH modifica varios tipos de campos, se comprueban todos los
-permisos correspondientes antes de guardar.
+Un PATCH con varios tipos de campos exige todos los permisos correspondientes.
+El formulario de edición actual requiere lectura, actualización y asignación
+de roles. Ocultar acciones en Vue no sustituye la protección del backend.
 
-Los permisos de usuarios con varios roles se combinan mediante unión,
-según la matriz integrada.
-
-La interfaz administrativa actualmente permite entrar a cuentas con
-rol `Administrator`. La adaptación visual para otros roles con permisos
-de consulta sigue pendiente.
-
-## Validaciones
+## Reglas administrativas
 
 - Nombre de 2 a 120 caracteres.
 - Correo válido, normalizado y único.
 - Contraseña inicial de 10 a 128 caracteres.
-- Al menos un rol válido y sin duplicados.
+- Uno o varios roles válidos, sin asociaciones duplicadas.
 - Rechazo de campos no permitidos.
-- Protección del último administrador activo.
-- Exclusión de contraseñas y hashes en respuestas públicas.
+- No se elimina la cuenta al desactivarla.
+- Se impide desactivar o retirar el rol al último administrador activo.
+- Se bloquea la desactivación o retirada del rol Technician cuando existen
+  tickets asignados cuyo estado sea distinto de Closed.
+- Un ticket Resolved todavía bloquea esas operaciones hasta su cierre.
+- No se reasignan ni cierran tickets automáticamente.
+- Se conservan las referencias históricas a la cuenta.
 
-## Sesiones
+La protección frente a cambios concurrentes del último administrador utiliza
+una transacción y bloqueos en PostgreSQL.
 
-- El servidor consulta el estado y los roles actuales de la cuenta.
-- Desactivar una cuenta bloquea nuevos inicios de sesión e invalida
-  sus tokens anteriores.
-- Reactivar permite iniciar una sesión nueva, sin recuperar tokens
-  invalidados.
-- Las versiones de sesión están en memoria: reiniciar el backend
-  requiere iniciar sesión nuevamente.
-- El cierre de sesión actual descarta el token en el cliente; la ruta
-  de logout registra la acción.
+## Sesiones y permisos
 
-## Verificación
+- Cada solicitud protegida comprueba el estado y los roles actuales.
+- Desactivar bloquea nuevos inicios de sesión e invalida los tokens anteriores.
+- Reactivar permite iniciar una sesión nueva sin restaurar tokens invalidados.
+- Los cambios de rol afectan los permisos de sesiones existentes.
+- /auth/me utiliza Cache-Control: no-store.
+- Las versiones de sesión están en memoria; reiniciar la API exige nuevo login.
+- El cierre de sesión de la interfaz descarta el token del cliente.
+- La ruta de logout registra la acción; no revoca por sí sola el token.
 
-Comandos utilizados:
+## Pruebas verificadas durante el desarrollo
+
+| Grupo | Resultado |
+|---|---|
+| Jest y Supertest: API, autorización y arquitectura | 56 aprobadas |
+| Integración del repositorio con PostgreSQL real | 6 aprobadas |
+| Cypress: flujos de interfaz | 5 aprobadas |
+| TypeScript del backend y frontend | Sin errores |
+| Compilación del frontend | Correcta |
+
+Los resultados corresponden a ejecuciones separadas.
+
+Las pruebas generales usan el repositorio en memoria.
+Las seis pruebas de integración utilizan PostgreSQL real y un esquema temporal.
+
+### Comprobaciones de PostgreSQL
+
+- Lectura de usuarios y roles desde otra conexión.
+- Rechazo de correos duplicados normalizados.
+- Rechazo de roles inexistentes sin crear cuentas parciales.
+- Reversión de cambios ante un error.
+- Persistencia de datos, roles y estado.
+- Conservación de un administrador activo ante desactivaciones concurrentes.
+
+### Flujos de Cypress
+
+1. Crear un técnico, recargar, filtrar, desactivar y reactivar.
+2. Consulta de gerente sin acciones administrativas.
+3. Protección del listado sin sesión.
+4. Edición de datos y roles, error de guardado, reintento y persistencia.
+5. Retirada del formulario abierto al recibir permisos revocados.
+
+La quinta prueba simula la respuesta de permisos sin modificar la cuenta
+administradora real. Las pruebas de API cubren cambios efectivos de roles.
+
+## Ejecutar comprobaciones generales
 
 ```powershell
 npm run typecheck
 npm run test:api
 npm run type-check -w apps/web
+npm run build -w apps/web
 ```
 
-Se reportaron 43 pruebas de backend aprobadas y comprobaciones de
-TypeScript sin errores.
+Sin TEST_DATABASE_URL, las pruebas de integración PostgreSQL se omiten.
 
-Las pruebas actuales utilizan cuentas en memoria; no sustituyen las
-pruebas de integración con PostgreSQL.
+## Ejecutar integración PostgreSQL
 
-### Comprobaciones manuales realizadas
+Crear una sola vez la base de pruebas:
 
-- Inicio de sesión administrativo.
-- Creación y consulta de usuarios.
-- Búsqueda y filtros.
-- Edición de nombre, correo y roles.
-- Activación y desactivación.
-- Protección del último administrador.
-- Invalidación de tokens después de desactivar y reactivar.
-- Conservación de usuarios después de reiniciar el backend.
-- Conservación del nombre y roles editados después del reinicio.
+```powershell
+& "C:\Program Files\PostgreSQL\17\bin\psql.exe" -h localhost -p 5432 -U postgres -d postgres -W -c "CREATE DATABASE omnidesk_test;"
+```
 
-## Pendientes para cerrar FR-002
+La prueba crea su esquema temporal y aplica ambas migraciones automáticamente.
+No necesita tablas preparadas previamente en el esquema public.
 
-- Definir y aplicar la política para técnicos con tickets pendientes.
-- Adaptar navegación y acciones de Vue a los permisos efectivos.
-- Agregar pruebas específicas de gestión de usuarios.
-- Agregar pruebas de integración con PostgreSQL.
-- Instalar el ejecutable de Cypress y ejecutar los flujos completos.
-- Preparar evidencias y documentación para validación QA.
+```powershell
+$env:TEST_DATABASE_URL = node --env-file=apps/api/.env -e "const url = new URL(process.env.DATABASE_URL); url.pathname = '/omnidesk_test'; console.log(url.toString());"
 
-La persistencia implementada corresponde a usuarios y roles.
-Los demás módulos conservan su almacenamiento actual.
+try {
+    npm test -w apps/api -- --runInBand --runTestsByPath src/modules/users/users.postgres.integration.test.ts
+} finally {
+    Remove-Item Env:TEST_DATABASE_URL -ErrorAction SilentlyContinue
+}
+```
+
+El esquema temporal se elimina al terminar.
+La prueba exige que la base se llame omnidesk_test.
+
+## Ejecutar Cypress
+
+Instalar y verificar el ejecutable si es necesario:
+
+```powershell
+Remove-Item Env:CYPRESS_INSTALL_BINARY -ErrorAction SilentlyContinue
+npm exec -w apps/web -- cypress install
+npm exec -w apps/web -- cypress verify
+npm run build -w apps/web
+```
+
+Detener cualquier API anterior que use el puerto 3000.
+
+Terminal 1:
+
+```powershell
+$env:CORS_ORIGIN = "http://localhost:4173"
+npm run dev:api
+```
+
+Terminal 2:
+
+```powershell
+npm run preview -w apps/web -- --port 4173 --strictPort
+```
+
+Terminal 3:
+
+```powershell
+npm exec -w apps/web -- cypress run --e2e --spec cypress/e2e/users.cy.ts
+```
+
+La API debe permitir el origen http://localhost:4173.
+Las pruebas crean cuentas identificables de Cypress en la base de desarrollo.
+
+El archivo example.cy.ts generado por Vue conserva una prueba de bienvenida
+que no corresponde a OmniDesk. El comando anterior ejecuta únicamente users.cy.ts.
+
+## Límites de la implementación actual
+
+- La persistencia migrada corresponde a usuarios y roles.
+- Tickets y auditoría conservan su almacenamiento en memoria.
+- Reiniciar la API elimina los tickets y registros de auditoría en memoria.
+- La comprobación de tickets pendientes consulta ese almacenamiento actual.
+- La coordinación entre asignaciones y cambios de acceso del técnico utiliza
+  un bloqueo en memoria, válido para una sola instancia de la API.
+- Las sesiones requieren una solución compartida antes de ejecutar varias
+  instancias del backend.
+- La disponibilidad operativa del técnico corresponde a FR-007.
+- No se implementaron invitaciones por correo ni recuperación de contraseña.
+
+## Entrega a QA
+
+Edgar debe revisar los criterios de aceptación, confirmar las políticas
+administrativas y registrar su aprobación o los hallazgos.
+
+Las pruebas aprobadas de desarrollo no sustituyen la validación formal de QA.

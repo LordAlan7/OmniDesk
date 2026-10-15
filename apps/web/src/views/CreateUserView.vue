@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { ApiError } from '../services/api'
 import { createUser, listRoles } from '../services/users'
+import { useFormAccess } from '../composables/useFormAccess'
 
 const router = useRouter()
 const saving = ref(false)
@@ -26,8 +27,28 @@ const fieldErrors = reactive({
   roles: '',
 })
 
+const {
+  authorized,
+  ensureAccess,
+  handleAccessError,
+} = useFormAccess(
+  ['users:create', 'users:assign:roles'],
+  () => saving.value || loadingRoles.value,
+  () => {
+    form.name = ''
+    form.email = ''
+    form.password = ''
+    form.roles = []
+    availableRoles.value = []
+  },
+)
+
 const blocked = computed(
-  () => saving.value || loadingRoles.value || !!rolesError.value,
+  () =>
+    !authorized.value ||
+    saving.value ||
+    loadingRoles.value ||
+    !!rolesError.value,
 )
 
 async function loadRoles() {
@@ -37,6 +58,8 @@ async function loadRoles() {
   rolesError.value = ''
 
   try {
+    if (!(await ensureAccess())) return
+
     const response = await listRoles()
     availableRoles.value = response.data
 
@@ -48,6 +71,8 @@ async function loadRoles() {
       response.data.includes(role),
     )
   } catch (cause) {
+    if (await handleAccessError(cause)) return
+
     rolesError.value =
       cause instanceof Error
         ? cause.message
@@ -91,6 +116,8 @@ async function save() {
   saving.value = true
 
   try {
+    if (!(await ensureAccess())) return
+
     await createUser({
       name,
       email,
@@ -101,10 +128,9 @@ async function save() {
     form.password = ''
     await router.push('/users')
   } catch (cause) {
-    if (cause instanceof ApiError && cause.status === 401) {
-      error.value =
-        'Tu sesión terminó. Los datos siguen en el formulario; necesitas iniciar sesión nuevamente para guardar.'
-    } else if (cause instanceof ApiError && cause.status === 409) {
+    if (await handleAccessError(cause)) return
+
+    if (cause instanceof ApiError && cause.status === 409) {
       fieldErrors.email = cause.message
     } else {
       error.value =
@@ -149,6 +175,7 @@ onMounted(loadRoles)
       </div>
 
       <form
+        v-if="authorized"
         :aria-busy="saving || loadingRoles"
         @submit.prevent="save"
       >

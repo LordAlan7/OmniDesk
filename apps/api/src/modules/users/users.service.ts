@@ -2,11 +2,19 @@ import bcrypt from 'bcryptjs';
 import { env } from '../../config/env';
 import { Errors } from '../../shared/errors';
 import { ROLES, Role } from '../../shared/types';
-import { invalidateUserSessions } from '../../shared/security/jwt';
+import {
+  invalidateUserSessions,
+} from '../../shared/security/jwt';
 import { recordAudit } from '../audit';
 import { usersRepository as memory } from './users.repository';
-import { postgresUsersRepository as postgres } from './users.postgres.repository';
+import {
+  postgresUsersRepository as postgres,
+} from './users.postgres.repository';
 import { PublicUser, User } from './users.types';
+import {
+  assertNoPendingTickets,
+  withTechnicianLifecycleLock,
+} from './users.lifecycle';
 
 const useMemory = env.nodeEnv === 'test';
 
@@ -21,13 +29,17 @@ export const toPublic = (
   { passwordHash: _omit, ...rest }: User,
 ): PublicUser => rest;
 
-async function findInternal(id: number): Promise<User | undefined> {
+async function findInternal(
+  id: number,
+): Promise<User | undefined> {
   return useMemory
     ? memory.findById(id)
     : postgres.findById(id);
 }
 
-async function findByEmail(email: string): Promise<User | undefined> {
+async function findByEmail(
+  email: string,
+): Promise<User | undefined> {
   return useMemory
     ? memory.findByEmail(email.trim().toLowerCase())
     : postgres.findByEmail(email);
@@ -45,7 +57,9 @@ export async function listAvailableRoles(): Promise<Role[]> {
   return useMemory ? [...ROLES] : postgres.listRoles();
 }
 
-export async function getUser(id: number): Promise<PublicUser> {
+export async function getUser(
+  id: number,
+): Promise<PublicUser> {
   const user = await findInternal(id);
 
   if (!user) throw Errors.notFound('User');
@@ -76,7 +90,6 @@ export async function createUser(
     passwordHash: await bcrypt.hash(data.password, 10),
   };
 
-  // Revalidar después del hash para las pruebas en memoria.
   if (useMemory && memory.findByEmail(account.email)) {
     throw Errors.conflict(
       'El correo electrónico ya está registrado.',
@@ -102,76 +115,97 @@ export async function updateUser(
   patch: UserPatch,
   actorId: number,
 ): Promise<PublicUser> {
-  let updated: User;
+  return withTechnicianLifecycleLock(id, async () => {
+    const current = await findInternal(id);
 
-  if (useMemory) {
-    const user = memory.findById(id);
+    if (!current) throw Errors.notFound('User');
 
-    if (!user) throw Errors.notFound('User');
+    const nextRoles = patch.roles ?? current.roles;
+    const nextActive = patch.active ?? current.active;
 
-    const nextRoles = patch.roles ?? user.roles;
-    const nextActive = patch.active ?? user.active;
-    const nextEmail = (
-      patch.email ?? user.email
-    ).trim().toLowerCase();
-
-    const existing = memory.findByEmail(nextEmail);
-
-    if (existing && existing.id !== id) {
-      throw Errors.conflict(
-        'El correo electrónico ya está registrado.',
+    const removesTechnicianAccess =
+      current.roles.includes('Technician') &&
+      (
+        !nextActive ||
+        !nextRoles.includes('Technician')
       );
+
+    if (removesTechnicianAccess) {
+      await assertNoPendingTickets(id);
     }
 
-    const removesAdministrator =
-      user.active &&
-      user.roles.includes('Administrator') &&
-      (!nextActive || !nextRoles.includes('Administrator'));
+    let updated: User;
 
-    if (
-      removesAdministrator &&
-      !memory.list().some(
-        (other) =>
-          other.id !== id &&
-          other.active &&
-          other.roles.includes('Administrator'),
-      )
-    ) {
-      throw Errors.conflict(
-        'No se puede desactivar ni quitar el rol al último administrador activo.',
-      );
+    if (useMemory) {
+      const user = memory.findById(id);
+
+      if (!user) throw Errors.notFound('User');
+
+      const nextEmail = (
+        patch.email ?? user.email
+      ).trim().toLowerCase();
+
+      const existing = memory.findByEmail(nextEmail);
+
+      if (existing && existing.id !== id) {
+        throw Errors.conflict(
+          'El correo electrónico ya está registrado.',
+        );
+      }
+
+      const removesAdministrator =
+        user.active &&
+        user.roles.includes('Administrator') &&
+        (
+          !nextActive ||
+          !nextRoles.includes('Administrator')
+        );
+
+      if (
+        removesAdministrator &&
+        !memory.list().some(
+          (other) =>
+            other.id !== id &&
+            other.active &&
+            other.roles.includes('Administrator'),
+        )
+      ) {
+        throw Errors.conflict(
+          'No se puede desactivar ni quitar el rol al último administrador activo.',
+        );
+      }
+
+      user.name = patch.name ?? user.name;
+      user.email = nextEmail;
+      user.roles = [...nextRoles];
+      user.active = nextActive;
+
+      updated = user;
+    } else {
+      updated = await postgres.update(id, patch);
     }
 
-    user.name = patch.name ?? user.name;
-    user.email = nextEmail;
-    user.roles = [...nextRoles];
-    user.active = nextActive;
-    updated = user;
-  } else {
-    // PostgreSQL valida y guarda dentro de una transacción.
-    updated = await postgres.update(id, patch);
-  }
+    if (patch.active === false) {
+      invalidateUserSessions(id);
+    }
 
-  if (patch.active === false) {
-    invalidateUserSessions(id);
-  }
-
-  recordAudit({
-    action: 'user.updated',
-    entity: 'user',
-    entityId: id,
-    actorId,
-    metadata: {
-      after: {
-        name: updated.name,
-        email: updated.email,
-        roles: [...updated.roles],
-        active: updated.active,
+    recordAudit({
+      action: 'user.updated',
+      entity: 'user',
+      entityId: id,
+      actorId,
+      metadata: {
+        after: {
+          name: updated.name,
+          email: updated.email,
+          roles: [...updated.roles],
+          active: updated.active,
+        },
       },
-    },
-  });
+    });
 
-  return toPublic(updated);
+    return toPublic(updated);
+  });
 }
 
 export async function verifyCredentials(
@@ -182,7 +216,10 @@ export async function verifyCredentials(
 
   if (!user || !user.active) return null;
 
-  const valid = await bcrypt.compare(password, user.passwordHash);
+  const valid = await bcrypt.compare(
+    password,
+    user.passwordHash,
+  );
 
   return valid ? toPublic(user) : null;
 }
@@ -200,9 +237,11 @@ export async function isActiveTechnician(
 ): Promise<boolean> {
   const user = await findInternal(id);
 
-  return !!user &&
+  return (
+    !!user &&
     user.active &&
-    user.roles.includes('Technician');
+    user.roles.includes('Technician')
+  );
 }
 
 export async function setUserRoles(

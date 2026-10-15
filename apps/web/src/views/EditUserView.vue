@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ApiError } from '../services/api'
+import { useFormAccess } from '../composables/useFormAccess'
 import {
   getUser,
   listRoles,
@@ -32,9 +33,30 @@ const fieldErrors = reactive({
   roles: '',
 })
 
+const {
+  authorized,
+  ensureAccess,
+  handleAccessError,
+} = useFormAccess(
+  ['users:read', 'users:update', 'users:assign:roles'],
+  () => saving.value || loading.value,
+  () => {
+    form.name = ''
+    form.email = ''
+    form.roles = []
+    originalRoles.value = []
+    availableRoles.value = []
+    active.value = false
+    success.value = ''
+  },
+)
+
 async function loadUser() {
+  if (saving.value) return
+
   loading.value = true
   loadError.value = ''
+  success.value = ''
 
   if (!Number.isSafeInteger(userId) || userId <= 0) {
     loadError.value = 'El identificador del usuario no es válido.'
@@ -43,6 +65,8 @@ async function loadUser() {
   }
 
   try {
+    if (!(await ensureAccess())) return
+
     const [userResponse, rolesResponse] = await Promise.all([
       getUser(userId),
       listRoles(),
@@ -61,6 +85,8 @@ async function loadUser() {
     active.value = user.active
     availableRoles.value = rolesResponse.data
   } catch (cause) {
+    if (await handleAccessError(cause)) return
+
     loadError.value =
       cause instanceof Error
         ? cause.message
@@ -71,7 +97,14 @@ async function loadUser() {
 }
 
 async function save() {
-  if (saving.value || loading.value || loadError.value) return
+  if (
+    !authorized.value ||
+    saving.value ||
+    loading.value ||
+    loadError.value
+  ) {
+    return
+  }
 
   saveError.value = ''
   success.value = ''
@@ -113,6 +146,8 @@ async function save() {
   saving.value = true
 
   try {
+    if (!(await ensureAccess())) return
+
     const response = await updateUser(userId, {
       name,
       email,
@@ -124,14 +159,19 @@ async function save() {
     form.roles = [...response.data.roles]
     originalRoles.value = [...response.data.roles]
     active.value = response.data.active
+
     success.value = 'Los cambios se guardaron correctamente.'
   } catch (cause) {
-    saveError.value =
-      cause instanceof ApiError && cause.status === 401
-        ? 'Tu sesión terminó. Conservamos los datos del formulario; necesitas iniciar sesión nuevamente.'
-        : cause instanceof Error
+    if (await handleAccessError(cause)) return
+
+    if (cause instanceof ApiError && cause.status === 409) {
+      saveError.value = cause.message
+    } else {
+      saveError.value =
+        cause instanceof Error
           ? cause.message
           : 'No se pudieron guardar los cambios.'
+    }
   } finally {
     saving.value = false
   }
@@ -160,8 +200,8 @@ onMounted(loadUser)
         </button>
       </div>
 
-      <form
-        v-else
+    <form
+        v-else-if="authorized"
         :aria-busy="saving"
         @submit.prevent="save"
       >

@@ -18,14 +18,22 @@ import { filesRouter } from './modules/files';
 import { knowledgeRouter } from './modules/knowledge';
 import { notificationsRouter } from './modules/notifications';
 import { reportsRouter } from './modules/reports';
-import { ticketsRouter } from './modules/tickets';
+import {
+  ticketsRouter,
+  hasPendingTicketsForTechnician,
+} from './modules/tickets';
 import {
   usersRouter,
   findUserById,
+  configurePendingTicketsChecker,
 } from './modules/users';
 
 export function createApp() {
   configureAccountResolver(findUserById);
+
+  configurePendingTicketsChecker(
+    hasPendingTicketsForTechnician,
+  );
 
   const app = express();
 
