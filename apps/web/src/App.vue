@@ -18,7 +18,7 @@ async function onLogout() {
     <RouterLink :to="{ name: 'dashboard' }">Inicio</RouterLink>
     <!-- Solo se muestran las opciones permitidas. El backend valida igualmente cada petición. -->
     <RouterLink v-if="session.can('tickets:read:own', 'tickets:read:all')" :to="{ name: 'tickets' }" data-testid="nav-tickets">Tickets</RouterLink>
-    <RouterLink v-if="session.can('users:manage')" :to="{ name: 'admin-users' }" data-testid="nav-admin">Usuarios</RouterLink>
+    <RouterLink v-if="session.can('users:read:list')" :to="{ name: 'users' }" data-testid="nav-admin">Usuarios</RouterLink>
     <span class="spacer" />
     <span>{{ session.user?.name }}</span>
     <button type="button" data-testid="nav-logout" @click="onLogout">Cerrar sesión</button>

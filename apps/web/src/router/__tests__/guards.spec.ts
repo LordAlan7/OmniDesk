@@ -4,7 +4,7 @@ import router from '../index'
 import { useSessionStore } from '@/stores/session'
 
 const employee = { id: 1, name: 'Demo', email: 'e@x.com', roles: ['Employee'], permissions: ['tickets:read:own'] }
-const admin = { id: 5, name: 'Admin', email: 'a@x.com', roles: ['Administrator'], permissions: ['users:manage'] }
+const admin = { id: 5, name: 'Admin', email: 'a@x.com', roles: ['Administrator'], permissions: ['users:read:list'] }
 
 beforeEach(async () => {
   setActivePinia(createPinia())
@@ -28,7 +28,7 @@ describe('router guards', () => {
 
   it('empleado en ruta de administración -> acceso denegado', async () => {
     loginAs(employee)
-    await router.push('/admin/users')
+    await router.push('/users')
     expect(router.currentRoute.value.name).toBe('forbidden')
   })
 

@@ -3,31 +3,99 @@ import { Errors } from '../errors';
 import { AuthUser, Role, hasRole } from '../types';
 import { verifyAccessToken } from './jwt';
 
-/** Exige un JWT Bearer válido y deja el usuario en req.user. */
-export const authenticate: RequestHandler = (req, _res, next) => {
+type Account = AuthUser & { active: boolean };
+
+type AccountResolver = (
+  id: number,
+) =>
+  | Account
+  | undefined
+  | Promise<Account | undefined>;
+
+let resolveAccount: AccountResolver | undefined;
+
+export function configureAccountResolver(
+  resolver: AccountResolver,
+): void {
+  resolveAccount = resolver;
+}
+
+// Valida el token y obtiene el estado y roles actuales.
+export const authenticate: RequestHandler = async (
+  req,
+  _res,
+  next,
+) => {
   const header = req.header('authorization');
+
   if (!header?.startsWith('Bearer ')) {
-    return next(Errors.unauthorized('A Bearer token is required.'));
+    return next(
+      Errors.unauthorized('A Bearer token is required.'),
+    );
   }
+
+  let tokenUser: AuthUser;
+
   try {
-    req.user = verifyAccessToken(header.slice('Bearer '.length));
-    next();
+    tokenUser = verifyAccessToken(
+      header.slice('Bearer '.length),
+    );
   } catch {
-    next(Errors.unauthorized('The token is invalid or has expired.'));
+    return next(
+      Errors.unauthorized('The token is invalid or has expired.'),
+    );
   }
+
+  if (!resolveAccount) {
+    return next(
+      new Error('Account validation is unavailable.'),
+    );
+  }
+
+  try {
+    const account = await resolveAccount(tokenUser.id);
+
+    if (!account || !account.active) {
+      return next(
+        Errors.unauthorized(
+          'La cuenta no existe o está desactivada.',
+        ),
+      );
+    }
+
+    req.user = {
+      id: account.id,
+      email: account.email,
+      name: account.name,
+      roles: [...account.roles],
+    };
+  } catch (cause) {
+    // Un fallo de conexión a la base de datos no es
+    // un error de contraseña o de sesión.
+    return next(cause);
+  }
+
+  next();
 };
 
-/** RBAC en el servidor: el usuario debe tener al menos uno de los roles indicados. */
 export const requireRole =
   (...roles: Role[]): RequestHandler =>
   (req, _res, next) => {
-    if (!req.user) return next(Errors.unauthorized());
-    if (!hasRole(req.user, ...roles)) return next(Errors.forbidden());
+    if (!req.user) {
+      return next(Errors.unauthorized());
+    }
+
+    if (!hasRole(req.user, ...roles)) {
+      return next(Errors.forbidden());
+    }
+
     next();
   };
 
-/** Devuelve req.user o lanza 401 (para usar dentro de controladores). */
-export function currentUser(req: { user?: AuthUser }): AuthUser {
+export function currentUser(
+  req: { user?: AuthUser },
+): AuthUser {
   if (!req.user) throw Errors.unauthorized();
+
   return req.user;
 }

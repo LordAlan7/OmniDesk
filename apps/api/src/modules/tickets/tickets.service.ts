@@ -8,7 +8,10 @@ import {
 } from '../../shared/authorization';
 import { recordAudit } from '../audit';
 import { notify } from '../notifications';
-import { isActiveTechnician } from '../users';
+import {
+  isActiveTechnician,
+  withTechnicianLifecycleLock,
+} from '../users';
 import { TicketFilter, ticketsRepository as repo } from './tickets.repository';
 import { Ticket, TicketStatus } from './tickets.types';
 
@@ -114,44 +117,80 @@ export function setPriority(id: number, priorityId: number, user: AuthUser): Tic
   return ticket;
 }
 
-export function assignTechnician(
+export async function assignTechnician(
   id: number,
   technicianId: number,
   dueDate: string | undefined,
   user: AuthUser,
-): Ticket {
+): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_ASSIGN)) {
-    throw Errors.forbidden('Only service advisors can assign tickets.');
+    throw Errors.forbidden(
+      'Only service advisors can assign tickets.',
+    );
   }
-  const ticket = getTicketForUser(id, user);
-  if (ticket.status !== 'Open' && ticket.status !== 'Assigned') {
-    throw Errors.invalidState(`A ticket in status "${ticket.status}" cannot be (re)assigned.`);
-  }
-  if (!isActiveTechnician(technicianId)) {
-    throw Errors.validation([{ field: 'technicianId', message: 'The user is not an active technician.' }]);
-  }
-  const from = ticket.assignedTechnicianId;
-  ticket.assignedTechnicianId = technicianId;
-  ticket.dueDate = dueDate ?? ticket.dueDate;
-  const wasOpen = ticket.status === 'Open';
-  if (wasOpen) {
-    moveTo(ticket, 'Assigned', user);
-  } else {
-    repo.save(ticket);
-  }
-  repo.addHistory({ ticketId: id, actorId: user.id, action: 'assigned', from, to: technicianId });
-  recordAudit({
-    action: 'ticket.assigned',
-    entity: 'ticket',
-    entityId: id,
-    actorId: user.id,
-    metadata: { from, to: technicianId },
-  });
-  notify(technicianId, 'ticket.assigned', `Ticket #${id} was assigned to you.`, {
-    entity: 'ticket',
-    id,
-  });
-  return ticket;
+
+  return withTechnicianLifecycleLock(
+    technicianId,
+    async () => {
+      if (!(await isActiveTechnician(technicianId))) {
+        throw Errors.validation([
+          {
+            field: 'technicianId',
+            message: 'The user is not an active technician.',
+          },
+        ]);
+      }
+
+      // Consultar el ticket después de esperar la validación,
+      // para trabajar con su estado actual.
+      const ticket = getTicketForUser(id, user);
+
+      if (
+        ticket.status !== 'Open' &&
+        ticket.status !== 'Assigned'
+      ) {
+        throw Errors.invalidState(
+          `A ticket in status "${ticket.status}" cannot be (re)assigned.`,
+        );
+      }
+
+      const from = ticket.assignedTechnicianId;
+
+      ticket.assignedTechnicianId = technicianId;
+      ticket.dueDate = dueDate ?? ticket.dueDate;
+
+      if (ticket.status === 'Open') {
+        moveTo(ticket, 'Assigned', user);
+      } else {
+        repo.save(ticket);
+      }
+
+      repo.addHistory({
+        ticketId: id,
+        actorId: user.id,
+        action: 'assigned',
+        from,
+        to: technicianId,
+      });
+
+      recordAudit({
+        action: 'ticket.assigned',
+        entity: 'ticket',
+        entityId: id,
+        actorId: user.id,
+        metadata: { from, to: technicianId },
+      });
+
+      notify(
+        technicianId,
+        'ticket.assigned',
+        `Ticket #${id} was assigned to you.`,
+        { entity: 'ticket', id },
+      );
+
+      return ticket;
+    },
+  );
 }
 
 export function changeStatus(id: number, to: TicketStatus, user: AuthUser): Ticket {
