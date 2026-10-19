@@ -1,45 +1,82 @@
+
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { apiRequest, setToken } from '../services/api'
-import { clearSession, refreshSession } from '../services/session'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ApiError } from '@/api/http'
+import { useSessionStore } from '@/stores/session'
 
-interface LoginResponse {
-  accessToken: string
-}
-
+const session = useSessionStore()
 const router = useRouter()
+const route = useRoute()
+
 const email = ref('')
 const password = ref('')
 const loading = ref(false)
-const error = ref('')
+const errorMessage = ref('')
+const fieldErrors = ref<{ email?: string; password?: string }>({})
 
-async function login() {
+const expired = computed(() => route.query.reason === 'expired')
+
+/** Solo permite redirecciones a rutas internas. */
+function safeRedirect(): string {
+  const redirect = route.query.redirect
+
+  if (
+    typeof redirect === 'string' &&
+    redirect.startsWith('/') &&
+    !redirect.startsWith('//') &&
+    !redirect.includes('\\')
+  ) {
+    return redirect
+  }
+
+  // Mantiene la navegación según los permisos del usuario.
+  return session.can('users:read:list')
+    ? '/users'
+    : '/knowledge/documents'
+}
+
+function validate(): boolean {
+  fieldErrors.value = {}
+
+  if (!email.value.trim()) {
+    fieldErrors.value.email = 'El correo es obligatorio.'
+  }
+
+  if (!password.value) {
+    fieldErrors.value.password = 'La contraseña es obligatoria.'
+  }
+
+  return Object.keys(fieldErrors.value).length === 0
+}
+
+async function onSubmit() {
   if (loading.value) return
 
-  error.value = ''
+  errorMessage.value = ''
+
+  if (!validate()) return
+
   loading.value = true
-  clearSession()
 
   try {
-    const response = await apiRequest<LoginResponse>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: email.value.trim(),
-        password: password.value,
-      }),
-    })
-
-    setToken(response.data.accessToken)
+    await session.login(email.value.trim(), password.value)
     password.value = ''
 
-    const user = await refreshSession()
-    await router.replace(user?.permissions.includes('users:read:list') ? '/users' : '/knowledge/documents')
-  } catch (cause) {
-    error.value =
-      cause instanceof Error
-        ? cause.message
-        : 'No se pudo iniciar sesión.'
+    await router.replace(safeRedirect())
+  } catch (e) {
+    if (e instanceof ApiError && e.kind === 'network') {
+      errorMessage.value =
+        'No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.'
+    } else if (e instanceof ApiError && e.kind === 'server') {
+      errorMessage.value =
+        'El servidor tuvo un problema. Inténtalo de nuevo más tarde.'
+    } else if (e instanceof ApiError && e.status === 400) {
+      errorMessage.value = 'Revisa los datos ingresados.'
+    } else {
+      // No revelar si la cuenta existe o si la contraseña es incorrecta.
+      errorMessage.value = 'Correo o contraseña incorrectos.'
+    }
   } finally {
     loading.value = false
   }
@@ -50,39 +87,83 @@ async function login() {
   <main class="login-page">
     <section class="login-card">
       <div class="brand">OmniDesk</div>
+
       <h1>Iniciar sesión</h1>
 
       <p class="description">
         Inicia sesión con tu cuenta. El acceso depende de tus permisos.
       </p>
 
-      <form :aria-busy="loading" @submit.prevent="login">
+      <p
+        v-if="expired"
+        class="info"
+        data-testid="login-expired"
+      >
+        Tu sesión terminó. Inicia sesión de nuevo.
+      </p>
+
+      <form
+        novalidate
+        :aria-busy="loading"
+        @submit.prevent="onSubmit"
+      >
         <label for="email">Correo electrónico</label>
+
         <input
           id="email"
           v-model="email"
           type="email"
           autocomplete="username"
           placeholder="correo@empresa.com"
-          required
+          data-testid="login-email"
           :disabled="loading"
+          :aria-invalid="!!fieldErrors.email"
+          required
         />
 
+        <p
+          v-if="fieldErrors.email"
+          class="error"
+          data-testid="login-email-error"
+        >
+          {{ fieldErrors.email }}
+        </p>
+
         <label for="password">Contraseña</label>
+
         <input
           id="password"
           v-model="password"
           type="password"
           autocomplete="current-password"
-          required
+          data-testid="login-password"
           :disabled="loading"
+          :aria-invalid="!!fieldErrors.password"
+          required
         />
 
-        <p v-if="error" class="error" role="alert">
-          {{ error }}
+        <p
+          v-if="fieldErrors.password"
+          class="error"
+          data-testid="login-password-error"
+        >
+          {{ fieldErrors.password }}
         </p>
 
-        <button type="submit" :disabled="loading">
+        <p
+          v-if="errorMessage"
+          class="error"
+          role="alert"
+          data-testid="login-error"
+        >
+          {{ errorMessage }}
+        </p>
+
+        <button
+          type="submit"
+          :disabled="loading"
+          data-testid="login-submit"
+        >
           {{ loading ? 'Iniciando sesión…' : 'Iniciar sesión' }}
         </button>
       </form>
@@ -144,7 +225,6 @@ input {
   border: 1px solid #b7c3d4;
   border-radius: 8px;
   font: inherit;
-  margin-bottom: 8px;
 }
 
 input:focus {
@@ -153,6 +233,7 @@ input:focus {
 }
 
 button {
+  margin-top: 12px;
   padding: 13px;
   border: 0;
   border-radius: 8px;
@@ -174,5 +255,14 @@ button:disabled {
   padding: 12px;
   border-radius: 8px;
   overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.info {
+  color: #2457a7;
+  background: #edf4ff;
+  padding: 12px;
+  border-radius: 8px;
+  line-height: 1.5;
 }
 </style>

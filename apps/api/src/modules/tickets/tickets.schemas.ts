@@ -8,6 +8,12 @@ import { PRIORITIES, TICKET_STATUSES } from './tickets.types';
 
 const priorityIds = Object.keys(PRIORITIES).map(Number);
 
+// ──────────────────────────────────────────────────────────────────────────────
+// NUEVOS LÍMITES PARA FR-010
+// ──────────────────────────────────────────────────────────────────────────────
+const businessLocationLimits = { min: 1, max: 200 };
+const motorcycleModelLimits = { min: 1, max: 200 };
+
 export const createTicketSchema = z
   .object({
     title: z
@@ -36,6 +42,18 @@ export const createTicketSchema = z
       .number()
       .int()
       .positive(MESSAGES.positiveInt('categoryId')),
+      
+    // NUEVOS CAMPOS FR-010:
+    storeLocation: z
+      .string()
+      .trim()
+      .min(businessLocationLimits.min, MESSAGES.required('La tienda o ubicación'))
+      .max(businessLocationLimits.max, MESSAGES.tooLong('La tienda', businessLocationLimits.max)),
+    motorcycleModel: z
+      .string()
+      .trim()
+      .min(motorcycleModelLimits.min, MESSAGES.required('El modelo de motocicleta'))
+      .max(motorcycleModelLimits.max, MESSAGES.tooLong('El modelo de motocicleta', motorcycleModelLimits.max)),
   })
   .strict();
 
@@ -70,14 +88,38 @@ export const updateTicketSchema = z
       .int()
       .positive(MESSAGES.positiveInt('categoryId'))
       .optional(),
-    // NUEVO: Obligatorio para el versionado optimista.
     version: z
       .number()
       .int()
       .positive(MESSAGES.positiveInt('version')),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 1, { // > 1 porque ahora siempre viene version
+  .refine((v) => Object.keys(v).length > 1, { 
+    message: MESSAGES.noFieldsToUpdate,
+  });
+
+// NUEVO SCHEMA PARA FR-010:
+export const businessInfoUpdateSchema = z
+  .object({
+    storeLocation: z
+      .string()
+      .trim()
+      .min(businessLocationLimits.min, MESSAGES.required('La tienda o ubicación'))
+      .max(businessLocationLimits.max, MESSAGES.tooLong('La tienda', businessLocationLimits.max))
+      .optional(),
+    motorcycleModel: z
+      .string()
+      .trim()
+      .min(motorcycleModelLimits.min, MESSAGES.required('El modelo de motocicleta'))
+      .max(motorcycleModelLimits.max, MESSAGES.tooLong('El modelo de motocicleta', motorcycleModelLimits.max))
+      .optional(),
+    version: z
+      .number()
+      .int()
+      .positive(MESSAGES.positiveInt('version')),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 1, { 
     message: MESSAGES.noFieldsToUpdate,
   });
 
@@ -151,7 +193,7 @@ export const closeSchema = z
   })
   .strict();
 
-  export const categoryUpdateSchema = z
+export const categoryUpdateSchema = z
   .object({
     categoryId: z
       .number()

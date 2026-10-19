@@ -13,6 +13,7 @@ import {
   updateTicketSchema,
 } from './tickets.schemas';
 import * as service from './tickets.service';
+import { businessInfoUpdateSchema } from './tickets.schemas';
 
 export const ticketsRouter = Router();
 
@@ -120,6 +121,15 @@ ticketsRouter.patch('/tickets/:id/category', authenticate, async (req, res, next
       res,
       await service.updateCategory(parseId(req.params.id), categoryId, currentUser(req)),
     );
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.patch('/tickets/:id/business-information', authenticate, async (req, res, next) => {
+  try {
+    const body = businessInfoUpdateSchema.parse(req.body);
+    ok(res, await service.updateBusinessInfo(parseId(req.params.id), body, currentUser(req)));
   } catch (err) {
     next(err);
   }

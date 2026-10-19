@@ -79,11 +79,18 @@ async function moveTo(
 }
 
 export async function createTicket(
-  data: { title: string; description: string; categoryId: number },
+  data: { 
+    title: string; 
+    description: string; 
+    categoryId: number;
+    storeLocation: string;      // NUEVO
+    motorcycleModel: string;    // NUEVO
+  },
   user: AuthUser,
 ): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_CREATE)) throw Errors.forbidden();
   const ticket = await repo.create({ ...data, createdBy: user.id });
+  // ...
   await repo.addHistory({
     ticketId: ticket.id,
     actorId: user.id,
@@ -343,6 +350,59 @@ export async function updateCategory(
     entityId: id,
     actorId: user.id,
     metadata: { from, to: categoryId },
+  });
+
+  return ticket;
+}
+export async function updateBusinessInfo(
+  id: number,
+  patch: { storeLocation?: string; motorcycleModel?: string; version: number },
+  user: AuthUser,
+): Promise<Ticket> {
+  const ticket = await getTicketForUser(id, user);
+  
+  // Solo Advisor y Manager pueden editar
+  const canEdit = can(user, PERMISSIONS.TICKETS_UPDATE) && can(user, PERMISSIONS.TICKETS_READ_ALL);
+  if (!canEdit) throw Errors.forbidden();
+
+  // No se puede editar un ticket cerrado
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se puede editar la información comercial de un ticket cerrado.');
+  }
+
+  // Versionado optimista
+  if (ticket.version !== patch.version) {
+    throw Errors.conflict('El ticket fue modificado por otro usuario.');
+  }
+
+  const from = {
+    storeLocation: ticket.storeLocation,
+    motorcycleModel: ticket.motorcycleModel,
+  };
+
+  if (patch.storeLocation !== undefined) ticket.storeLocation = patch.storeLocation;
+  if (patch.motorcycleModel !== undefined) ticket.motorcycleModel = patch.motorcycleModel;
+
+  const saved = await repo.save(ticket);
+  Object.assign(ticket, saved);
+
+  await repo.addHistory({
+    ticketId: id,
+    actorId: user.id,
+    action: 'business_info_updated',
+    from,
+    to: {
+      storeLocation: patch.storeLocation,
+      motorcycleModel: patch.motorcycleModel,
+    },
+  });
+
+  recordAudit({
+    action: 'ticket.business_info_updated',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+    metadata: { from, to: patch },
   });
 
   return ticket;

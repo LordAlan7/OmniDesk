@@ -1,49 +1,71 @@
+
 import { createRouter, createWebHistory } from 'vue-router'
-import DocumentsView from '../views/DocumentsView.vue'
-import LoginView from '../views/LoginView.vue'
-import UsersView from '../views/UsersView.vue'
-import CreateUserView from '../views/CreateUserView.vue'
-import EditUserView from '../views/EditUserView.vue'
-import AccessDeniedView from '../views/AccessDeniedView.vue'
-import {
-  hasEveryPermission,
-  refreshSession,
-} from '../services/session'
+import { useSessionStore } from '@/stores/session'
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    /** Ruta accesible sin sesión. */
+    public?: boolean
+    /** Basta con tener uno de estos permisos para entrar. */
+    permissions?: string[]
+    /** Se requieren todos los permisos indicados. */
+    allPermissions?: string[]
+  }
+}
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+
   routes: [
-    { path: '/knowledge/documents', name: 'documents', component: DocumentsView, meta: { requiresAuth: true, permissions: ['knowledge:read'] } },
-    {
-      path: '/',
-      redirect: '/users',
-    },
     {
       path: '/login',
       name: 'login',
-      component: LoginView,
+      component: () => import('@/views/LoginView.vue'),
+      meta: { public: true },
     },
     {
-      path: '/access-denied',
-      name: 'access-denied',
-      component: AccessDeniedView,
+      path: '/',
+      name: 'dashboard',
+      component: () => import('@/views/DashboardView.vue'),
+    },
+    {
+      path: '/knowledge/documents',
+      name: 'documents',
+      component: () => import('@/views/DocumentsView.vue'),
+      meta: {
+        permissions: ['knowledge:read'],
+      },
+    },
+    {
+      path: '/tickets',
+      name: 'tickets',
+      component: () => import('@/views/TicketsView.vue'),
+      meta: {
+        permissions: ['tickets:read:own', 'tickets:read:all'],
+      },
+    },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: () => import('@/views/AdminUsersView.vue'),
+      meta: {
+        permissions: ['users:manage'],
+      },
     },
     {
       path: '/users',
       name: 'users',
-      component: UsersView,
+      component: () => import('@/views/UsersView.vue'),
       meta: {
-        requiresAuth: true,
         permissions: ['users:read:list'],
       },
     },
     {
       path: '/users/new',
       name: 'create-user',
-      component: CreateUserView,
+      component: () => import('@/views/CreateUserView.vue'),
       meta: {
-        requiresAuth: true,
-        permissions: [
+        allPermissions: [
           'users:create',
           'users:assign:roles',
         ],
@@ -52,10 +74,9 @@ const router = createRouter({
     {
       path: '/users/:id/edit',
       name: 'edit-user',
-      component: EditUserView,
+      component: () => import('@/views/EditUserView.vue'),
       meta: {
-        requiresAuth: true,
-        permissions: [
+        allPermissions: [
           'users:read',
           'users:update',
           'users:assign:roles',
@@ -63,35 +84,61 @@ const router = createRouter({
       },
     },
     {
+      path: '/forbidden',
+      name: 'forbidden',
+      component: () => import('@/views/ForbiddenView.vue'),
+    },
+    {
+      path: '/access-denied',
+      name: 'access-denied',
+      component: () => import('@/views/AccessDeniedView.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
-      redirect: '/users',
+      redirect: { name: 'dashboard' },
     },
   ],
 })
 
 router.beforeEach(async (to) => {
-  if (!to.meta.requiresAuth) return true
+  const session = useSessionStore()
 
-  try {
-    const user = await refreshSession()
+  await session.restore()
 
-    if (!user) return { name: 'login' }
-
-    const permissions = (
-      to.meta.permissions ?? []
-    ) as string[]
-
-    if (!hasEveryPermission(...permissions)) {
-      return { name: 'access-denied' }
+  if (to.meta.public) {
+    if (session.isAuthenticated && to.name === 'login') {
+      return { name: 'dashboard' }
     }
 
     return true
-  } catch {
+  }
+
+  if (!session.isAuthenticated) {
     return {
-      name: 'access-denied',
-      query: { reason: 'unavailable' },
+      name: 'login',
+      query: { redirect: to.fullPath },
     }
   }
+
+  // Basta con uno de los permisos indicados.
+  if (
+    to.meta.permissions &&
+    !session.can(...to.meta.permissions)
+  ) {
+    return { name: 'forbidden' }
+  }
+
+  // Para estas rutas se necesitan todos los permisos.
+  if (
+    to.meta.allPermissions &&
+    !to.meta.allPermissions.every((permission) =>
+      session.can(permission),
+    )
+  ) {
+    return { name: 'forbidden' }
+  }
+
+  return true
 })
 
 export default router
