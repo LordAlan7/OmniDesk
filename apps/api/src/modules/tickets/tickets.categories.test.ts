@@ -26,7 +26,8 @@ describe('FR-005 - Ticket Classification', () => {
     const res = await request(app)
       .post('/api/v1/tickets')
       .set(bearer(employeeToken))
-      .send({ title: 'Falla de red', description: 'No hay internet', categoryId: 4 });
+      .send({ title: 'Falla de red', description: 'No hay internet', categoryId: 4, storeLocation: 'Sucursal Norte',
+  motorcycleModel: 'Italika Vort-X 250', });
     
     expect(res.status).toBe(201);
     expect(res.body.data.categoryId).toBe(4);

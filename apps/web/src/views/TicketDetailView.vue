@@ -48,7 +48,10 @@ const editingInformation = ref(false)
 const informationError = ref('')
 const informationSuccess = ref('')
 const loadingInformation = ref(false)
-const canEditInformation = computed(() => hasPermission('tickets:update'))
+const canEditInformation = computed(() =>
+  !!ticket.value && ticket.value.status !== 'Closed' &&
+  (sessionUser.value?.roles.some(role => role === 'Service Advisor' || role === 'Manager') ?? false),
+)
 
 async function openInformation() {
   if (!ticket.value || saving.value || loadingInformation.value || !canEditInformation.value) return

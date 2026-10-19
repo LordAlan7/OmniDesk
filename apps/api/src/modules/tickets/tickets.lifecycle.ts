@@ -1,5 +1,5 @@
 import { Errors } from '../../shared/errors';
-import { ticketsRepository } from './tickets.repository';
+import { ticketsRepository} from './tickets.repository';
 import type { Ticket } from './tickets.types';
 
 /** Pendiente = cualquier ticket asignado que todavía no esté cerrado. */
