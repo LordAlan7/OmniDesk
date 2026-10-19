@@ -1,39 +1,95 @@
 import { z } from 'zod';
+import {
+  STRING_LIMITS,
+  MESSAGES,
+} from '../../shared/validation';
 import { ROLES } from '../../shared/types';
 
 const roleSchema = z.enum(ROLES);
 
 const rolesSchema = z
   .array(roleSchema)
-  .min(1, 'Selecciona al menos un rol.')
+  .min(1, MESSAGES.atLeastOneRole)
   .refine(
     (roles) => new Set(roles).size === roles.length,
-    { message: 'No se permiten roles duplicados.' },
+    { message: MESSAGES.duplicateRoles },
   );
 
 export const createUserSchema = z
   .object({
-    name: z.string().trim().min(2).max(120),
-    email: z.string().trim().toLowerCase().email(),
+    name: z
+      .string()
+      .trim()
+      .min(
+        STRING_LIMITS.userName.min,
+        MESSAGES.tooShort('El nombre', STRING_LIMITS.userName.min),
+      )
+      .max(
+        STRING_LIMITS.userName.max,
+        MESSAGES.tooLong('El nombre', STRING_LIMITS.userName.max),
+      ),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .min(
+        STRING_LIMITS.userEmail.min,
+        MESSAGES.tooShort('El correo', STRING_LIMITS.userEmail.min),
+      )
+      .max(
+        STRING_LIMITS.userEmail.max,
+        MESSAGES.tooLong('El correo', STRING_LIMITS.userEmail.max),
+      )
+      .email(MESSAGES.invalidEmail),
     password: z
       .string()
-      .min(10, 'La contraseña debe tener al menos 10 caracteres.')
-      .max(128),
+      .min(
+        STRING_LIMITS.userPassword.min,
+        MESSAGES.tooShort('La contraseña', STRING_LIMITS.userPassword.min),
+      )
+      .max(
+        STRING_LIMITS.userPassword.max,
+        MESSAGES.tooLong('La contraseña', STRING_LIMITS.userPassword.max),
+      ),
     roles: rolesSchema.default(['Employee']),
   })
   .strict();
 
 export const updateUserSchema = z
   .object({
-    name: z.string().trim().min(2).max(120).optional(),
-    email: z.string().trim().toLowerCase().email().optional(),
+    name: z
+      .string()
+      .trim()
+      .min(
+        STRING_LIMITS.userName.min,
+        MESSAGES.tooShort('El nombre', STRING_LIMITS.userName.min),
+      )
+      .max(
+        STRING_LIMITS.userName.max,
+        MESSAGES.tooLong('El nombre', STRING_LIMITS.userName.max),
+      )
+      .optional(),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .min(
+        STRING_LIMITS.userEmail.min,
+        MESSAGES.tooShort('El correo', STRING_LIMITS.userEmail.min),
+      )
+      .max(
+        STRING_LIMITS.userEmail.max,
+        MESSAGES.tooLong('El correo', STRING_LIMITS.userEmail.max),
+      )
+      .email(MESSAGES.invalidEmail)
+      .optional(),
     roles: rolesSchema.optional(),
     active: z.boolean().optional(),
   })
   .strict()
   .refine(
     (data) => Object.values(data).some((value) => value !== undefined),
-    { message: 'Debes enviar al menos un campo para actualizar.' },
+    { message: MESSAGES.noFieldsToUpdate },
   );
 
 export const setRolesSchema = z
