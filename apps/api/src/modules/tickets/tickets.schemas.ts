@@ -152,3 +152,7 @@ export const closeSchema = z
       .optional(),
   })
   .strict();
+
+export const categoryUpdateSchema = z.object({
+  categoryId: z.number().int().positive(MESSAGES.positiveInt('categoryId')),
+}).strict();

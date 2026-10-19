@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
-import { createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema } from './tickets.schemas';
+import { categoryUpdateSchema, createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema } from './tickets.schemas';
 import * as service from './tickets.service';
 
 export const ticketsRouter = Router();
@@ -117,4 +117,13 @@ ticketsRouter.get('/tickets/:id/history', authenticate, async (req, res, next) =
 
 ticketsRouter.get('/tickets/:id/eligible-technicians', authenticate, async (req, res) => {
   ok(res, await service.eligibleTechnicians(parseId(req.params.id), currentUser(req)));
+});
+
+ticketsRouter.patch('/tickets/:id/category', authenticate, async (req, res, next) => {
+  try {
+    const { categoryId } = categoryUpdateSchema.parse(req.body);
+    ok(res, await service.updateCategory(parseId(req.params.id), categoryId, currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
 });
