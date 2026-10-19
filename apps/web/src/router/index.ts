@@ -1,50 +1,143 @@
+
 import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 
 declare module 'vue-router' {
   interface RouteMeta {
-    /** Ruta accesible sin sesión (login). */
+    /** Ruta accesible sin sesión. */
     public?: boolean
-    /** Basta con tener UNO de estos permisos para entrar. */
+    /** Basta con tener uno de estos permisos para entrar. */
     permissions?: string[]
+    /** Se requieren todos los permisos indicados. */
+    allPermissions?: string[]
   }
 }
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+
   routes: [
-    { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
-    { path: '/', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { public: true },
+    },
+    {
+      path: '/',
+      name: 'dashboard',
+      component: () => import('@/views/DashboardView.vue'),
+    },
+    {
+      path: '/knowledge/documents',
+      name: 'documents',
+      component: () => import('@/views/DocumentsView.vue'),
+      meta: {
+        permissions: ['knowledge:read'],
+      },
+    },
     {
       path: '/tickets',
       name: 'tickets',
       component: () => import('@/views/TicketsView.vue'),
-      meta: { permissions: ['tickets:read:own', 'tickets:read:all'] },
+      meta: {
+        permissions: ['tickets:read:own', 'tickets:read:all'],
+      },
     },
     {
       path: '/admin/users',
       name: 'admin-users',
       component: () => import('@/views/AdminUsersView.vue'),
-      meta: { permissions: ['users:manage'] },
+      meta: {
+        permissions: ['users:manage'],
+      },
     },
-    { path: '/forbidden', name: 'forbidden', component: () => import('@/views/ForbiddenView.vue') },
-    { path: '/:pathMatch(.*)*', redirect: { name: 'dashboard' } },
+    {
+      path: '/users',
+      name: 'users',
+      component: () => import('@/views/UsersView.vue'),
+      meta: {
+        permissions: ['users:read:list'],
+      },
+    },
+    {
+      path: '/users/new',
+      name: 'create-user',
+      component: () => import('@/views/CreateUserView.vue'),
+      meta: {
+        allPermissions: [
+          'users:create',
+          'users:assign:roles',
+        ],
+      },
+    },
+    {
+      path: '/users/:id/edit',
+      name: 'edit-user',
+      component: () => import('@/views/EditUserView.vue'),
+      meta: {
+        allPermissions: [
+          'users:read',
+          'users:update',
+          'users:assign:roles',
+        ],
+      },
+    },
+    {
+      path: '/forbidden',
+      name: 'forbidden',
+      component: () => import('@/views/ForbiddenView.vue'),
+    },
+    {
+      path: '/access-denied',
+      name: 'access-denied',
+      component: () => import('@/views/AccessDeniedView.vue'),
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: { name: 'dashboard' },
+    },
   ],
 })
 
 router.beforeEach(async (to) => {
   const session = useSessionStore()
-  await session.restore() // recarga: recupera la sesión si sigue vigente
+
+  await session.restore()
 
   if (to.meta.public) {
-    return session.isAuthenticated && to.name === 'login' ? { name: 'dashboard' } : true
+    if (session.isAuthenticated && to.name === 'login') {
+      return { name: 'dashboard' }
+    }
+
+    return true
   }
+
   if (!session.isAuthenticated) {
-    return { name: 'login', query: { redirect: to.fullPath } }
+    return {
+      name: 'login',
+      query: { redirect: to.fullPath },
+    }
   }
-  if (to.meta.permissions && !session.can(...to.meta.permissions)) {
-    return { name: 'forbidden' } // sin revelar el contenido protegido
+
+  // Basta con uno de los permisos indicados.
+  if (
+    to.meta.permissions &&
+    !session.can(...to.meta.permissions)
+  ) {
+    return { name: 'forbidden' }
   }
+
+  // Para estas rutas se necesitan todos los permisos.
+  if (
+    to.meta.allPermissions &&
+    !to.meta.allPermissions.every((permission) =>
+      session.can(permission),
+    )
+  ) {
+    return { name: 'forbidden' }
+  }
+
   return true
 })
 

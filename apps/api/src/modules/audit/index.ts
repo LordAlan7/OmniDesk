@@ -5,3 +5,5 @@
 export { auditRouter } from './audit.routes';
 export { recordAudit } from './audit.service';
 export type { AuditRecord } from './audit.types';
+
+export { recordDocumentAudit, readDocumentAudit } from './document-audit';

@@ -1,7 +1,17 @@
 /**
- * Módulo USERS (FR-002 - User & Technician Management)
- * API pública: otros módulos SOLO deben importar desde este archivo.
+ * API pública del módulo de usuarios.
  */
 export { usersRouter } from './users.routes';
-export { verifyCredentials, findUserById, isActiveTechnician } from './users.service';
+
+export {
+  verifyCredentials,
+  findUserById,
+  isActiveTechnician,
+} from './users.service';
+
+export {
+  configurePendingTicketsChecker,
+  withTechnicianLifecycleLock,
+} from './users.lifecycle';
+
 export type { PublicUser } from './users.types';

@@ -22,6 +22,7 @@ export interface Ticket {
   updatedAt: string;
   resolvedAt: string | null;
   closedAt: string | null;
+  version: number;
 }
 
 export interface TicketHistoryEntry {
