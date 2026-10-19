@@ -24,7 +24,7 @@ import {
   createUser,
   getUser,
   listAvailableRoles,
-  listUsers,
+  searchUsers,
   setUserRoles,
   updateUser,
 } from './users.service';
@@ -59,24 +59,10 @@ usersRouter.get(
       active: z.enum(['true', 'false']).optional(),
     }).parse(req.query);
 
-    const search = q.search?.toLowerCase();
-    const users = await listUsers();
-
-    const items = users.filter((user) => {
-      const matchesSearch =
-        !search ||
-        user.name.toLowerCase().includes(search) ||
-        user.email.toLowerCase().includes(search);
-
-      const matchesRole =
-        !q.role ||
-        user.roles.some((role) => role === q.role);
-
-      const matchesStatus =
-        q.active === undefined ||
-        user.active === (q.active === 'true');
-
-      return matchesSearch && matchesRole && matchesStatus;
+    const items = await searchUsers({
+      search: q.search,
+      role: q.role,
+      active: q.active === undefined ? undefined : q.active === 'true',
     });
 
     paginated(res, items, q.page, q.limit);

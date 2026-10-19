@@ -72,4 +72,46 @@ describe('modular monolith rules', () => {
       }
     }
   });
+
+  it('the declared dependency graph has no cycles', () => {
+    const state = new Map<string, 'visiting' | 'done'>();
+    const visit = (mod: string, trail: string[]): void => {
+      if (state.get(mod) === 'done') return;
+      expect({ cycle: state.get(mod) === 'visiting' ? [...trail, mod] : [] }).toEqual({ cycle: [] });
+      state.set(mod, 'visiting');
+      for (const dep of ALLOWED[mod]) visit(dep, [...trail, mod]);
+      state.set(mod, 'done');
+    };
+    Object.keys(ALLOWED).forEach((m) => visit(m, []));
+  });
+
+  it('HTTP routes/controllers never touch repositories or the database', () => {
+    for (const file of sourceFiles(MODULES_DIR).filter((f) => f.endsWith('.routes.ts'))) {
+      for (const spec of importsOf(file)) {
+        const rel = path.relative(__dirname, file);
+        expect({ file: rel, spec, forbidden: /repository|shared\/db|^pg$/.test(spec) }).toEqual({
+          file: rel,
+          spec,
+          forbidden: false,
+        });
+      }
+    }
+  });
+
+  it('only repositories, db/ and scripts import the PostgreSQL driver', () => {
+    for (const file of sourceFiles(__dirname)) {
+      const rel = path.relative(__dirname, file).split(path.sep).join('/');
+      const allowed = /repository\.ts$/.test(rel) || rel.startsWith('shared/db/') || rel.startsWith('scripts/');
+      const usesDriver = importsOf(file).some((spec) => spec === 'pg' || /shared\/db\/pool$/.test(spec));
+      expect({ rel, usesDriver: usesDriver && !allowed }).toEqual({ rel, usesDriver: false });
+    }
+  });
+
+  it('modules never read credentials directly: only config/env.ts reads process.env', () => {
+    for (const file of sourceFiles(__dirname)) {
+      const rel = path.relative(__dirname, file).split(path.sep).join('/');
+      if (rel === 'config/env.ts') continue;
+      expect({ rel, readsEnv: /process\.env/.test(fs.readFileSync(file, 'utf8')) }).toEqual({ rel, readsEnv: false });
+    }
+  });
 });

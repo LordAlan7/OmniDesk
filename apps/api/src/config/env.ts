@@ -18,6 +18,9 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
   databaseUrl: process.env.DATABASE_URL,
   openAiApiKey: process.env.OPENAI_API_KEY,
+  /** Adaptadores externos: 'mock' / 'memory' no llaman a ningún servicio real. */
+  aiProvider: process.env.AI_PROVIDER ?? 'mock',
+  storageProvider: process.env.STORAGE_PROVIDER ?? 'memory',
   /** Usuarios de demostración (solo desarrollo/pruebas). */
   seedDemoData: !isProduction,
 };

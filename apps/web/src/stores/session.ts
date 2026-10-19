@@ -18,6 +18,9 @@ interface LoginResponse {
 
 const TOKEN_KEY = 'omnidesk.token'
 
+/** Token persistido de la pestaña (sessionStorage); único lugar que conoce la clave. */
+export const readStoredToken = (): string | null => sessionStorage.getItem(TOKEN_KEY)
+
 export const useSessionStore = defineStore('session', () => {
   const user = ref<SessionUser | null>(null)
   /** true cuando ya se intentó recuperar la sesión al cargar/recargar la app. */
@@ -53,7 +56,7 @@ export const useSessionStore = defineStore('session', () => {
   /** Al recargar: valida el token guardado con /auth/me (identidad y permisos vigentes). */
   async function restore(): Promise<void> {
     if (restored.value) return
-    const saved = sessionStorage.getItem(TOKEN_KEY)
+    const saved = readStoredToken()
     if (saved) {
       setAccessToken(saved)
       try {

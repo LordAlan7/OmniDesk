@@ -53,6 +53,28 @@ export async function listUsers(): Promise<PublicUser[]> {
   return users.map(toPublic);
 }
 
+export interface UserFilters {
+  search?: string;
+  role?: Role;
+  active?: boolean;
+}
+
+/** Regla de listado: búsqueda por nombre/correo, rol y estado. Vive aquí, no en la ruta. */
+export async function searchUsers(
+  filters: UserFilters,
+): Promise<PublicUser[]> {
+  const search = filters.search?.toLowerCase();
+
+  return (await listUsers()).filter(
+    (user) =>
+      (!search ||
+        user.name.toLowerCase().includes(search) ||
+        user.email.toLowerCase().includes(search)) &&
+      (!filters.role || user.roles.includes(filters.role)) &&
+      (filters.active === undefined || user.active === filters.active),
+  );
+}
+
 export async function listAvailableRoles(): Promise<Role[]> {
   return useMemory ? [...ROLES] : postgres.listRoles();
 }

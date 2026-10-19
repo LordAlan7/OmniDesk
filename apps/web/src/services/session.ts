@@ -1,7 +1,6 @@
 import { readonly, ref } from 'vue'
-import { useSessionStore, type SessionUser } from '@/stores/session'
-import { setAccessToken } from '@/api/http'
-import { ApiError, apiRequest, clearToken, getToken } from './api'
+import { readStoredToken, useSessionStore, type SessionUser } from '@/stores/session'
+import { api, ApiError, setAccessToken } from '@/api/http'
 
 export type { SessionUser }
 
@@ -28,7 +27,7 @@ export function clearSession(): void {
 
 export async function refreshSession(): Promise<SessionUser | null> {
   const session = useSessionStore()
-  const token = getToken()
+  const token = readStoredToken()
 
   // Retirar permisos anteriores mientras se valida la sesión.
   session.user = null
@@ -38,25 +37,25 @@ export async function refreshSession(): Promise<SessionUser | null> {
   setAccessToken(token)
 
   try {
-    const response = await apiRequest<SessionUser>('/auth/me')
+    const me = await api<SessionUser>('/auth/me')
 
     // Evitar restaurar una sesión que cambió durante la solicitud.
-    if (getToken() !== token) return null
+    if (readStoredToken() !== token) return null
 
-    if (!response.data || !Array.isArray(response.data.permissions)) {
+    if (!me || !Array.isArray(me.permissions)) {
       throw new Error('El servidor no devolvió los permisos de la cuenta.')
     }
 
-    session.user = response.data
-    currentUser.value = response.data
-    return response.data
+    session.user = me
+    currentUser.value = me
+    return me
   } catch (cause) {
-    if (getToken() === token) {
+    if (readStoredToken() === token) {
       session.user = null
       currentUser.value = null
 
       if (cause instanceof ApiError && cause.status === 401) {
-        clearToken()
+        session.clear()
         return null
       }
     }

@@ -6,3 +6,5 @@
  * API pública: otros módulos SOLO deben importar desde este archivo.
  */
 export { filesRouter } from './files.routes';
+export { createStorageProvider } from './storage';
+export type { StorageProvider, StoredObject } from './storage/storage-provider';

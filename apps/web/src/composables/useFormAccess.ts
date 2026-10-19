@@ -1,6 +1,6 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ApiError } from '../services/api'
+import { ApiError } from '@/api/http'
 import {
   clearSession,
   hasEveryPermission,
