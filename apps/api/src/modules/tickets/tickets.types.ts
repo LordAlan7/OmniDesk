@@ -18,6 +18,8 @@ export interface Ticket {
   assignedTechnicianId: number | null;
   dueDate: string | null;
   resolution: string | null;
+  storeLocation: string | null;   
+  motorcycleModel: string | null;   
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;

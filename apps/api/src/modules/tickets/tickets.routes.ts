@@ -1,24 +1,26 @@
 import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
-import {
-  assignmentSchema,
-  closeSchema,
-  createTicketSchema,
-  listTicketsSchema,
-  prioritySchema,
-  resolutionSchema,
-  statusSchema,
-  updateTicketSchema,
-} from './tickets.schemas';
+import { createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema } from './tickets.schemas';
 import * as service from './tickets.service';
 
 export const ticketsRouter = Router();
 
+// NUEVO: Endpoint para obtener categorías para el formulario
+ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) => {
+  try {
+    ok(res, await service.listCategories());
+  } catch (err) {
+    next(err);
+  }
+});
+
 ticketsRouter.post('/tickets', authenticate, async (req, res, next) => {
   try {
     const body = createTicketSchema.parse(req.body);
-    ok(res, await service.createTicket(body, currentUser(req)), 201);
+    // NUEVO: Extraer cabecera de idempotencia
+    const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
+    ok(res, await service.createTicket(body, currentUser(req), idempotencyKey), 201);
   } catch (err) {
     next(err);
   }

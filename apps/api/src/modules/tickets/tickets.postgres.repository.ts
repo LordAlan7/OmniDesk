@@ -2,11 +2,7 @@ import type { PoolClient } from 'pg';
 import { getPool } from '../../shared/db/pool';
 import { Errors } from '../../shared/errors';
 import { assertStatusInvariants } from './tickets.lifecycle';
-import type {
-  Ticket,
-  TicketHistoryEntry,
-  TicketStatus,
-} from './tickets.types';
+import type { Ticket, TicketHistoryEntry, TicketStatus } from './tickets.types';
 import type { TicketFilter } from './tickets.repository';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -23,6 +19,8 @@ interface TicketRow {
   assigned_technician_id: number | null;
   due_date: Date | null;
   resolution: string | null;
+  store_location: string | null;      // NUEVO
+  motorcycle_model: string | null;     // NUEVO
   created_at: Date;
   updated_at: Date;
   resolved_at: Date | null;
@@ -40,6 +38,7 @@ interface HistoryRow {
   created_at: Date;
 }
 
+
 function toTicket(row: TicketRow): Ticket {
   return {
     id: row.id,
@@ -52,6 +51,8 @@ function toTicket(row: TicketRow): Ticket {
     assignedTechnicianId: row.assigned_technician_id,
     dueDate: row.due_date ? row.due_date.toISOString() : null,
     resolution: row.resolution,
+    storeLocation: row.store_location,       // NUEVO
+    motorcycleModel: row.motorcycle_model,    // NUEVO
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     resolvedAt: row.resolved_at ? row.resolved_at.toISOString() : null,
@@ -76,6 +77,7 @@ const SELECT_TICKETS = `
   SELECT
     id, title, description, category_id, priority_id, status,
     created_by, assigned_technician_id, due_date, resolution,
+    store_location, motorcycle_model,
     created_at, updated_at, resolved_at, closed_at, version
   FROM tickets
 `;
@@ -83,7 +85,6 @@ const SELECT_TICKETS = `
 // ──────────────────────────────────────────────────────────────────────────────
 // Operaciones con transacción (críticas)
 // ──────────────────────────────────────────────────────────────────────────────
-
 async function withTransaction<T>(
   operation: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
@@ -117,11 +118,16 @@ async function findByIdWithClient(
 // ──────────────────────────────────────────────────────────────────────────────
 
 export const postgresTicketsRepository = {
+  // NUEVO: Listar categorías para el formulario
+  async listCategories() {
+    const result = await getPool().query('SELECT id, name FROM ticket_categories ORDER BY name');
+    return result.rows;
+  },
+
   async create(
-    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy'>,
+    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'>,
   ): Promise<Ticket> {
     return withTransaction(async (client) => {
-      // Validar categoría existente (FK real).
       const category = await client.query(
         'SELECT id FROM ticket_categories WHERE id = $1',
         [data.categoryId],
@@ -134,10 +140,10 @@ export const postgresTicketsRepository = {
 
       const result = await client.query<TicketRow>(
         `INSERT INTO tickets
-           (title, description, category_id, created_by, status, version)
-         VALUES ($1, $2, $3, $4, 'Open', 1)
+           (title, description, category_id, created_by, status, version, store_location, motorcycle_model)
+         VALUES ($1, $2, $3, $4, 'Open', 1, $5, $6)
          RETURNING *`,
-        [data.title, data.description, data.categoryId, data.createdBy],
+        [data.title, data.description, data.categoryId, data.createdBy, data.storeLocation, data.motorcycleModel],
       );
 
       if (!result.rows[0]) {
@@ -160,7 +166,6 @@ export const postgresTicketsRepository = {
     const conditions: string[] = [];
     const values: unknown[] = [];
 
-    // visibleTo: si no es null, restringir a "es creador o está asignado".
     if (filter.visibleTo !== null) {
       values.push(filter.visibleTo);
       conditions.push(
@@ -191,12 +196,6 @@ export const postgresTicketsRepository = {
     return result.rows.map(toTicket);
   },
 
-  /**
-   * Guarda el ticket completo.
-   * - Valida invariantes de estado.
-   * - Incrementa la versión (versionado optimista).
-   * - Devuelve el ticket actualizado con su nueva versión.
-   */
   async save(ticket: Ticket): Promise<Ticket> {
     assertStatusInvariants(ticket);
 
@@ -211,11 +210,13 @@ export const postgresTicketsRepository = {
                assigned_technician_id = $6,
                due_date = $7,
                resolution = $8,
-               resolved_at = $9,
-               closed_at = $10,
+               store_location = $9,
+               motorcycle_model = $10,
+               resolved_at = $11,
+               closed_at = $12,
                updated_at = NOW(),
                version = version + 1
-         WHERE id = $11
+         WHERE id = $13
          RETURNING *`,
         [
           ticket.title,
@@ -226,6 +227,8 @@ export const postgresTicketsRepository = {
           ticket.assignedTechnicianId,
           ticket.dueDate,
           ticket.resolution,
+          ticket.storeLocation,
+          ticket.motorcycleModel,
           ticket.resolvedAt,
           ticket.closedAt,
           ticket.id,

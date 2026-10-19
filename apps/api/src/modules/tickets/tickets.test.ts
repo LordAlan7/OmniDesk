@@ -1,7 +1,13 @@
 import request from 'supertest';
 import { app, bearer, loginAs } from '../../test-helpers';
 
-const newTicket = { title: 'Unable to access the booking system', description: 'Authentication error.', categoryId: 2 };
+const newTicket = { 
+  title: 'Unable to access the booking system', 
+  description: 'Authentication error.', 
+  categoryId: 2,
+  storeLocation: 'Sucursal Centro',
+  motorcycleModel: 'Italika FT150'
+};
 
 describe('tickets - full workflow', () => {
   let employee: string, advisor: string, technician: string, manager: string, other: string;
@@ -128,5 +134,75 @@ describe('stub modules', () => {
     const res = await request(app).get('/api/v1/knowledge/articles').set(bearer(token));
     expect(res.status).toBe(501);
     expect(res.body.error.code).toBe('NOT_IMPLEMENTED');
+  });
+});
+
+describe('FR-003 - Ticket Creation', () => {
+  let employee: string;
+
+  beforeAll(async () => {
+    employee = await loginAs('employee@company.com');
+  });
+
+  it('GET /tickets/categories - returns the category catalog', async () => {
+    const res = await request(app).get('/api/v1/tickets/categories').set(bearer(employee));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0]).toHaveProperty('id');
+    expect(res.body.data[0]).toHaveProperty('name');
+  });
+
+  it('POST /tickets - creates a ticket with business info (FR-010)', async () => {
+    const res = await request(app).post('/api/v1/tickets').set(bearer(employee)).send(newTicket);
+    expect(res.status).toBe(201);
+    expect(res.body.data.status).toBe('Open');
+    expect(res.body.data.storeLocation).toBe('Sucursal Centro');
+    expect(res.body.data.motorcycleModel).toBe('Italika FT150');
+    expect(res.body.data.priorityId).toBeNull();
+    expect(res.body.data.assignedTechnicianId).toBeNull();
+  });
+
+  it('POST /tickets - rejects description with only spaces', async () => {
+    const res = await request(app)
+      .post('/api/v1/tickets')
+      .set(bearer(employee))
+      .send({ title: 'Valid Title', description: '     ', categoryId: 2 });
+    
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('POST /tickets - prevents duplicate creation with Idempotency-Key', async () => {
+    const headers = { ...bearer(employee), 'Idempotency-Key': 'test-key-123' };
+    
+    // Primera petición
+    const res1 = await request(app).post('/api/v1/tickets').set(headers).send(newTicket);
+    expect(res1.status).toBe(201);
+    const firstTicketId = res1.body.data.id;
+
+    // Segunda petición con la misma llave
+    const res2 = await request(app).post('/api/v1/tickets').set(headers).send(newTicket);
+    expect(res2.status).toBe(201);
+    expect(res2.body.data.id).toBe(firstTicketId); // Debe devolver el mismo ticket
+  });
+
+  it('POST /tickets - rejects missing categoryId', async () => {
+    const res = await request(app)
+      .post('/api/v1/tickets')
+      .set(bearer(employee))
+      .send({ title: 'Test', description: 'Test desc' });
+    
+    expect(res.status).toBe(400);
+    expect(res.body.error.details.some((d: any) => d.field === 'categoryId')).toBe(true);
+  });
+
+  it('POST /tickets - rejects invalid category ID', async () => {
+    const res = await request(app)
+      .post('/api/v1/tickets')
+      .set(bearer(employee))
+      .send({ title: 'Test', description: 'Test desc', categoryId: 9999 });
+    
+    expect(res.status).toBe(400);
   });
 });

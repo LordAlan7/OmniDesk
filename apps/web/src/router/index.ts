@@ -1,4 +1,3 @@
-
 import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 
@@ -42,6 +41,14 @@ const router = createRouter({
       component: () => import('@/views/TicketsView.vue'),
       meta: {
         permissions: ['tickets:read:own', 'tickets:read:all'],
+      },
+    },
+    {
+      path: '/tickets/new',
+      name: 'create-ticket',
+      component: () => import('@/views/CreateTicketView.vue'),
+      meta: {
+        permissions: ['tickets:create'],
       },
     },
     {

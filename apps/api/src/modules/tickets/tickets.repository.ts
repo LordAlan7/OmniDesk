@@ -18,8 +18,18 @@ let nextTicketId = 1;
 let nextHistoryId = 1;
 
 const ticketsMemoryRepository = {
+
+    async listCategories() {
+    return [
+      { id: 1, name: 'Acceso' },
+      { id: 2, name: 'Hardware' },
+      { id: 3, name: 'Software' },
+      { id: 4, name: 'Red' }
+    ];
+  },
+
   async create(
-    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy'>,
+    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'>,
   ): Promise<Ticket> {
     const now = new Date().toISOString();
     const ticket: Ticket = {
@@ -30,6 +40,8 @@ const ticketsMemoryRepository = {
       assignedTechnicianId: null,
       dueDate: null,
       resolution: null,
+      storeLocation: data.storeLocation || null,     // NUEVO
+      motorcycleModel: data.motorcycleModel || null, // NUEVO
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,

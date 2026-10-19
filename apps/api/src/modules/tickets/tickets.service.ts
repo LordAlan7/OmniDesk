@@ -1,20 +1,15 @@
 import { Errors } from '../../shared/errors';
 import { AuthUser } from '../../shared/types';
-import {
-  PERMISSIONS,
-  can,
-  canAccessTicket,
-  ticketVisibilityFilter,
-} from '../../shared/authorization';
+import { PERMISSIONS, can, canAccessTicket, ticketVisibilityFilter } from '../../shared/authorization';
 import { recordAudit } from '../audit';
 import { notify } from '../notifications';
 import { isActiveTechnician } from '../users';
-import {
-  TicketFilter,
-  ticketsRepository as repo,
-} from './tickets.repository';
+import { TicketFilter, ticketsRepository as repo } from './tickets.repository';
 import { Ticket, TicketStatus } from './tickets.types';
 import { assertStatusInvariants } from './tickets.lifecycle';
+
+// NUEVO: Almacén en memoria para idempotencia (suficiente para una instancia de servidor)
+const idempotencyStore = new Map<string, Ticket>();
 
 const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   Open: ['Assigned'],
@@ -74,16 +69,38 @@ async function moveTo(
   });
   notify(ticket.createdBy, 'ticket.status_changed', `Your ticket #${ticket.id} is now "${to}".`, {
     entity: 'ticket',
-    id: ticket.id,
+    id: ticket.id, // <--- CORRECCIÓN AQUÍ
   });
 }
 
 export async function createTicket(
-  data: { title: string; description: string; categoryId: number },
+  data: { 
+    title: string; 
+    description: string; 
+    categoryId: number;
+    storeLocation?: string | null;
+    motorcycleModel?: string | null;
+  },
   user: AuthUser,
+  idempotencyKey?: string,
 ): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_CREATE)) throw Errors.forbidden();
-  const ticket = await repo.create({ ...data, createdBy: user.id });
+
+  // LÓGICA DE IDEMPOTENCIA: Previene duplicados si el frontend hace doble clic
+  if (idempotencyKey) {
+    const existingTicket = idempotencyStore.get(idempotencyKey);
+    if (existingTicket) {
+      return existingTicket; // Retornamos el ticket ya creado en lugar de crear uno nuevo
+    }
+  }
+
+  const ticket = await repo.create({ 
+    ...data, 
+    createdBy: user.id,
+    storeLocation: data.storeLocation || null,
+    motorcycleModel: data.motorcycleModel || null
+  });
+  
   await repo.addHistory({
     ticketId: ticket.id,
     actorId: user.id,
@@ -96,7 +113,18 @@ export async function createTicket(
     entityId: ticket.id,
     actorId: user.id,
   });
+
+  // Guardamos en el almacén de idempotencia
+  if (idempotencyKey) {
+    idempotencyStore.set(idempotencyKey, ticket);
+  }
+
   return ticket;
+}
+
+// NUEVO: Método para listar categorías desde el repositorio
+export async function listCategories() {
+  return repo.listCategories();
 }
 
 export async function listTickets(
@@ -238,7 +266,7 @@ export async function assignTechnician(
   });
   notify(technicianId, 'ticket.assigned', `Ticket #${id} was assigned to you.`, {
     entity: 'ticket',
-    id,
+    id, // <--- CORRECCIÓN AQUÍ
   });
   return ticket;
 }

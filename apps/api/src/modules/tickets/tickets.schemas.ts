@@ -1,9 +1,6 @@
 import { z } from 'zod';
 import { paginationSchema } from '../../shared/http';
-import {
-  STRING_LIMITS,
-  MESSAGES,
-} from '../../shared/validation';
+import { STRING_LIMITS, MESSAGES } from '../../shared/validation';
 import { PRIORITIES, TICKET_STATUSES } from './tickets.types';
 
 const priorityIds = Object.keys(PRIORITIES).map(Number);
@@ -13,29 +10,32 @@ export const createTicketSchema = z
     title: z
       .string()
       .trim()
-      .min(
-        STRING_LIMITS.ticketTitle.min,
-        MESSAGES.tooShort('El título', STRING_LIMITS.ticketTitle.min),
-      )
-      .max(
-        STRING_LIMITS.ticketTitle.max,
-        MESSAGES.tooLong('El título', STRING_LIMITS.ticketTitle.max),
-      ),
+      .min(STRING_LIMITS.ticketTitle.min, MESSAGES.tooShort('El título', STRING_LIMITS.ticketTitle.min))
+      .max(STRING_LIMITS.ticketTitle.max, MESSAGES.tooLong('El título', STRING_LIMITS.ticketTitle.max)),
     description: z
       .string()
       .trim()
-      .min(
-        STRING_LIMITS.ticketDescription.min,
-        MESSAGES.required('La descripción'),
-      )
-      .max(
-        STRING_LIMITS.ticketDescription.max,
-        MESSAGES.tooLong('La descripción', STRING_LIMITS.ticketDescription.max),
-      ),
+      .min(STRING_LIMITS.ticketDescription.min, MESSAGES.required('La descripción'))
+      .max(STRING_LIMITS.ticketDescription.max, MESSAGES.tooLong('La descripción', STRING_LIMITS.ticketDescription.max)),
     categoryId: z
       .number()
       .int()
       .positive(MESSAGES.positiveInt('categoryId')),
+    // NUEVO: Campos opcionales de negocio (FR-010)
+    storeLocation: z
+      .string()
+      .trim()
+      .max(200)
+      .optional()
+      .nullable()
+      .transform(v => v || null),
+    motorcycleModel: z
+      .string()
+      .trim()
+      .max(200)
+      .optional()
+      .nullable()
+      .transform(v => v || null),
   })
   .strict();
 
