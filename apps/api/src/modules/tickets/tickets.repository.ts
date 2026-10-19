@@ -19,12 +19,17 @@ let nextHistoryId = 1;
 
 const ticketsMemoryRepository = {
   async create(
-    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy'>,
+    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'>,
   ): Promise<Ticket> {
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: nextTicketId++,
-      ...data,
+      title: data.title,
+      description: data.description,
+      categoryId: data.categoryId,
+      createdBy: data.createdBy,
+      storeLocation: data.storeLocation,
+      motorcycleModel: data.motorcycleModel,
       priorityId: null,
       status: 'Open',
       assignedTechnicianId: null,
@@ -90,10 +95,3 @@ const useMemory = env.nodeEnv === 'test';
 export const ticketsRepository = useMemory
   ? ticketsMemoryRepository
   : postgresTicketsRepository;
-
-  export function resetTicketsRepository(): void {
-  tickets.length = 0;
-  history.length = 0;
-  nextTicketId = 1;
-  nextHistoryId = 1;
-}

@@ -28,6 +28,8 @@ interface TicketRow {
   resolved_at: Date | null;
   closed_at: Date | null;
   version: number;
+  store_location: string | null;
+  motorcycle_model: string | null;
 }
 
 interface HistoryRow {
@@ -57,6 +59,8 @@ function toTicket(row: TicketRow): Ticket {
     resolvedAt: row.resolved_at ? row.resolved_at.toISOString() : null,
     closedAt: row.closed_at ? row.closed_at.toISOString() : null,
     version: row.version,
+    storeLocation: row.store_location,
+    motorcycleModel: row.motorcycle_model,
   };
 }
 

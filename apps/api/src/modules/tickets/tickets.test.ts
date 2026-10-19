@@ -1,7 +1,8 @@
 import request from 'supertest';
 import { app, bearer, loginAs } from '../../test-helpers';
 
-const newTicket = { title: 'Unable to access the booking system', description: 'Authentication error.', categoryId: 2 };
+const newTicket = { title: 'Unable to access the booking system', description: 'Authentication error.', categoryId: 2, storeLocation: 'Sucursal Centro',
+  motorcycleModel: 'Italika FT150', };
 
 describe('tickets - full workflow', () => {
   let employee: string, advisor: string, technician: string, manager: string, other: string;

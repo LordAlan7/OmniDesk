@@ -23,6 +23,8 @@ export interface Ticket {
   resolvedAt: string | null;
   closedAt: string | null;
   version: number;
+  storeLocation: string | null;
+  motorcycleModel: string | null;
 }
 
 export interface TicketHistoryEntry {
