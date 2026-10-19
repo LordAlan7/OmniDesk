@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiRequest, setToken } from '../services/api'
-import { clearSession } from '../services/session'
+import { clearSession, refreshSession } from '../services/session'
 
 interface LoginResponse {
   accessToken: string
@@ -33,8 +33,8 @@ async function login() {
     setToken(response.data.accessToken)
     password.value = ''
 
-    // El router consulta /auth/me y valida users:read:list.
-    await router.replace('/users')
+    const user = await refreshSession()
+    await router.replace(user?.permissions.includes('users:read:list') ? '/users' : '/knowledge/documents')
   } catch (cause) {
     error.value =
       cause instanceof Error
@@ -50,7 +50,7 @@ async function login() {
   <main class="login-page">
     <section class="login-card">
       <div class="brand">OmniDesk</div>
-      <h1>Gestión de usuarios</h1>
+      <h1>Iniciar sesión</h1>
 
       <p class="description">
         Inicia sesión con tu cuenta. El acceso depende de tus permisos.
