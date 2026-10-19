@@ -1,4 +1,4 @@
-import { apiRequest } from './api'
+import { apiPage } from '@/api/http'
 
 export interface User {
   id: number
@@ -42,17 +42,17 @@ export function listUsers(filters: UserFilters = {}) {
     params.set('active', String(filters.active))
   }
 
-  return apiRequest<User[]>(`/users?${params.toString()}`)
+  return apiPage<User[]>(`/users?${params.toString()}`)
 }
 
 export function getUser(id: number) {
-  return apiRequest<User>(`/users/${id}`)
+  return apiPage<User>(`/users/${id}`)
 }
 
 export function createUser(data: CreateUserData) {
-  return apiRequest<User>('/users', {
+  return apiPage<User>('/users', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: data,
   })
 }
 
@@ -64,26 +64,26 @@ export function updateUser(
     roles: string[]
   },
 ) {
-  return apiRequest<User>(`/users/${id}`, {
+  return apiPage<User>(`/users/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(data),
+    body: data,
   })
 }
 
 export function setUserRoles(id: number, roles: string[]) {
-  return apiRequest<User>(`/users/${id}/roles`, {
+  return apiPage<User>(`/users/${id}/roles`, {
     method: 'PUT',
-    body: JSON.stringify({ roles }),
+    body: { roles },
   })
 }
 
 export function setUserStatus(id: number, active: boolean) {
-  return apiRequest<User>(`/users/${id}`, {
+  return apiPage<User>(`/users/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ active }),
+    body: { active },
   })
   
 }
 export function listRoles() {
-  return apiRequest<string[]>('/roles')
+  return apiPage<string[]>('/roles')
 }

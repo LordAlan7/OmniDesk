@@ -4,7 +4,7 @@ import {
   permissionsForRoles,
 } from '../../shared/authorization';
 import { recordAudit } from '../audit';
-import { verifyCredentials } from '../users';
+import { findUserById, verifyCredentials } from '../users';
 
 export async function login(email: string, password: string) {
   const user = await verifyCredentials(email, password);
@@ -39,4 +39,26 @@ export async function login(email: string, password: string) {
       ].sort(),
     },
   };
+}
+/** Identidad y permisos vigentes de la sesión (la fuente de verdad es el servidor). */
+export async function getProfile(userId: number) {
+  const me = await findUserById(userId);
+
+  if (!me || !me.active) {
+    throw Errors.unauthorized('The account is no longer active.');
+  }
+
+  return {
+    ...me,
+    permissions: [...permissionsForRoles(me.roles)].sort(),
+  };
+}
+
+export function logout(userId: number): void {
+  recordAudit({
+    action: 'auth.logout',
+    entity: 'user',
+    entityId: userId,
+    actorId: userId,
+  });
 }

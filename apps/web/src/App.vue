@@ -1,4 +1,3 @@
-
 <script setup lang="ts">
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
@@ -17,8 +16,11 @@ async function onLogout() {
   <header v-if="session.isAuthenticated && !route.meta.public" class="topbar">
     <strong>OmniDesk</strong>
 
-    <RouterLink :to="{ name: 'dashboard' }">Inicio</RouterLink>
+    <RouterLink :to="{ name: 'dashboard' }">
+      Inicio
+    </RouterLink>
 
+    <!-- Solo se muestran las opciones permitidas. El backend valida igualmente cada petición. -->
     <RouterLink
       v-if="session.can('tickets:read:own', 'tickets:read:all')"
       :to="{ name: 'tickets' }"

@@ -8,6 +8,25 @@ export interface Notification {
   createdAt: string;
 }
 
+/**
+ * Canal de entrega adicional a la bandeja interna (correo, WhatsApp, etc.). Cualquier canal externo
+ * se registra aquí detrás de esta interfaz; `notify` no conoce proveedores concretos.
+ */
+export interface NotificationChannel {
+  deliver(notification: Notification): void | Promise<void>;
+}
+
+const channels: NotificationChannel[] = [];
+
+export function registerChannel(channel: NotificationChannel): void {
+  channels.push(channel);
+}
+
+/** Solo para pruebas. */
+export function resetChannels(): void {
+  channels.length = 0;
+}
+
 // En memoria por ahora. El canal externo (correo/WhatsApp/otro) sigue como pregunta abierta #6.
 const store: Notification[] = [];
 let nextId = 1;
@@ -28,6 +47,12 @@ export function notify(
     createdAt: new Date().toISOString(),
   };
   store.push(n);
+  // Un canal externo caído nunca debe romper la operación de negocio que notifica.
+  for (const channel of channels) {
+    Promise.resolve()
+      .then(() => channel.deliver(n))
+      .catch(() => undefined);
+  }
   return n;
 }
 

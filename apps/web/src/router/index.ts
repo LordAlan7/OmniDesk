@@ -91,14 +91,15 @@ const router = createRouter({
       },
     },
     {
-      path: '/forbidden',
-      name: 'forbidden',
-      component: () => import('@/views/ForbiddenView.vue'),
-    },
-    {
       path: '/access-denied',
       name: 'access-denied',
       component: () => import('@/views/AccessDeniedView.vue'),
+      meta: { public: true },
+    },
+    {
+      path: '/forbidden',
+      name: 'forbidden',
+      component: () => import('@/views/ForbiddenView.vue'),
     },
     {
       path: '/:pathMatch(.*)*',
@@ -110,6 +111,7 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const session = useSessionStore()
 
+  // Recupera la sesión si sigue vigente.
   await session.restore()
 
   if (to.meta.public) {
@@ -127,7 +129,7 @@ router.beforeEach(async (to) => {
     }
   }
 
-  // Basta con uno de los permisos indicados.
+  // Basta con tener al menos uno de los permisos indicados.
   if (
     to.meta.permissions &&
     !session.can(...to.meta.permissions)
@@ -135,7 +137,7 @@ router.beforeEach(async (to) => {
     return { name: 'forbidden' }
   }
 
-  // Para estas rutas se necesitan todos los permisos.
+  // Para estas rutas se requieren todos los permisos indicados.
   if (
     to.meta.allPermissions &&
     !to.meta.allPermissions.every((permission) =>
