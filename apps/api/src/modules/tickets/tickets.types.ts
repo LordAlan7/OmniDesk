@@ -25,8 +25,6 @@ export interface Ticket {
   title: string;
   description: string;
   categoryId: number;
-  storeLocation: string | null;
-  motorcycleModel: string | null;
   priorityId: number | null;
   status: TicketStatus;
   createdBy: number;
@@ -39,6 +37,8 @@ export interface Ticket {
   resolvedAt: string | null;
   closedAt: string | null;
   version: number;
+  storeLocation: string | null;
+  motorcycleModel: string | null;
 }
 
 export interface TicketHistoryEntry {

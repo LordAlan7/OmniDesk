@@ -12,8 +12,6 @@ interface TicketRow {
   title: string;
   description: string;
   category_id: number;
-  store_location: string | null;
-  motorcycle_model: string | null;
   priority_id: number | null;
   status: Ticket['status'];
   created_by: number;
@@ -25,6 +23,8 @@ interface TicketRow {
   resolved_at: Date | null;
   closed_at: Date | null;
   version: number;
+  store_location: string | null;
+  motorcycle_model: string | null;
 }
 
 interface HistoryRow {
@@ -49,8 +49,6 @@ function toTicket(row: TicketRow): Ticket {
     title: row.title,
     description: row.description,
     categoryId: row.category_id,
-    storeLocation: row.store_location,
-    motorcycleModel: row.motorcycle_model,
     priorityId: row.priority_id,
     status: row.status,
     createdBy: row.created_by,
@@ -62,6 +60,8 @@ function toTicket(row: TicketRow): Ticket {
     resolvedAt: row.resolved_at?.toISOString() ?? null,
     closedAt: row.closed_at?.toISOString() ?? null,
     version: row.version,
+    storeLocation: row.store_location,
+    motorcycleModel: row.motorcycle_model,
   };
 }
 
