@@ -50,7 +50,7 @@ export async function apiRequest<T>(
   const headers = new Headers(options.headers)
   headers.set('Accept', 'application/json')
 
-  if (options.body !== undefined && options.body !== null) {
+  if (options.body !== undefined && options.body !== null && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
 

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { documentsRouter } from './documents.routes';
 import { notImplemented } from '../../shared/http';
 import { authenticate } from '../../shared/security/guards';
 
@@ -14,4 +15,4 @@ knowledgeRouter.get('/knowledge/articles/:id', authenticate, handler);
 knowledgeRouter.post('/knowledge/articles', authenticate, handler);
 knowledgeRouter.patch('/knowledge/articles/:id', authenticate, handler);
 knowledgeRouter.delete('/knowledge/articles/:id', authenticate, handler);
-knowledgeRouter.get('/knowledge/categories', authenticate, handler);
+knowledgeRouter.use(documentsRouter);

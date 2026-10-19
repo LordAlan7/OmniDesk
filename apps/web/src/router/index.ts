@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import DocumentsView from '../views/DocumentsView.vue'
 import LoginView from '../views/LoginView.vue'
 import UsersView from '../views/UsersView.vue'
 import CreateUserView from '../views/CreateUserView.vue'
@@ -12,6 +13,7 @@ import {
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    { path: '/knowledge/documents', name: 'documents', component: DocumentsView, meta: { requiresAuth: true, permissions: ['knowledge:read'] } },
     {
       path: '/',
       redirect: '/users',
