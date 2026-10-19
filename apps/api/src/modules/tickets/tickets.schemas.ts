@@ -70,9 +70,14 @@ export const updateTicketSchema = z
       .int()
       .positive(MESSAGES.positiveInt('categoryId'))
       .optional(),
+    // NUEVO: Obligatorio para el versionado optimista.
+    version: z
+      .number()
+      .int()
+      .positive(MESSAGES.positiveInt('version')),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 0, {
+  .refine((v) => Object.keys(v).length > 1, { // > 1 porque ahora siempre viene version
     message: MESSAGES.noFieldsToUpdate,
   });
 

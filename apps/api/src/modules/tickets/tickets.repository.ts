@@ -1,23 +1,26 @@
+import { env } from '../../config/env';
 import { Ticket, TicketHistoryEntry, TicketStatus } from './tickets.types';
+import { postgresTicketsRepository } from './tickets.postgres.repository';
 
 export interface TicketFilter {
-  /** Si es null, ve todos los tickets; si no, solo los propios/asignados a ese usuario. */
   visibleTo: number | null;
   status?: TicketStatus;
   priorityId?: number;
   categoryId?: number;
 }
 
-/**
- * Repositorio EN MEMORIA (esqueleto). Mantén esta interfaz al migrar a PostgreSQL.
- */
+// ──────────────────────────────────────────────────────────────────────────────
+// Implementación en memoria (tests y desarrollo sin BD)
+// ──────────────────────────────────────────────────────────────────────────────
 const tickets: Ticket[] = [];
 const history: TicketHistoryEntry[] = [];
 let nextTicketId = 1;
 let nextHistoryId = 1;
 
-export const ticketsRepository = {
-  create(data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy'>): Ticket {
+const ticketsMemoryRepository = {
+  async create(
+    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy'>,
+  ): Promise<Ticket> {
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: nextTicketId++,
@@ -31,14 +34,17 @@ export const ticketsRepository = {
       updatedAt: now,
       resolvedAt: null,
       closedAt: null,
+      version: 1,
     };
     tickets.push(ticket);
     return ticket;
   },
 
-  findById: (id: number) => tickets.find((t) => t.id === id),
+  async findById(id: number): Promise<Ticket | undefined> {
+    return tickets.find((t) => t.id === id);
+  },
 
-  list(filter: TicketFilter): Ticket[] {
+  async list(filter: TicketFilter): Promise<Ticket[]> {
     return tickets
       .filter(
         (t) =>
@@ -49,19 +55,45 @@ export const ticketsRepository = {
           (filter.priorityId === undefined || t.priorityId === filter.priorityId) &&
           (filter.categoryId === undefined || t.categoryId === filter.categoryId),
       )
+      .slice()
       .reverse();
   },
 
-  save(ticket: Ticket): Ticket {
+  async save(ticket: Ticket): Promise<Ticket> {
     ticket.updatedAt = new Date().toISOString();
+    ticket.version += 1;
     return ticket;
   },
 
-  addHistory(entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>): TicketHistoryEntry {
-    const record = { ...entry, id: nextHistoryId++, createdAt: new Date().toISOString() };
+  async addHistory(
+    entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>,
+  ): Promise<TicketHistoryEntry> {
+    const record = {
+      ...entry,
+      id: nextHistoryId++,
+      createdAt: new Date().toISOString(),
+    };
     history.push(record);
     return record;
   },
 
-  historyOf: (ticketId: number) => history.filter((h) => h.ticketId === ticketId),
+  async historyOf(ticketId: number): Promise<TicketHistoryEntry[]> {
+    return history.filter((h) => h.ticketId === ticketId);
+  },
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Switch: en tests usar memoria (rápido, sin BD); en dev/prod usar PostgreSQL.
+// ──────────────────────────────────────────────────────────────────────────────
+const useMemory = env.nodeEnv === 'test';
+
+export const ticketsRepository = useMemory
+  ? ticketsMemoryRepository
+  : postgresTicketsRepository;
+
+  export function resetTicketsRepository(): void {
+  tickets.length = 0;
+  history.length = 0;
+  nextTicketId = 1;
+  nextHistoryId = 1;
+}
