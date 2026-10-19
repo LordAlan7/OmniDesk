@@ -41,6 +41,7 @@ describe('NFR-001 · matriz de autorización', () => {
       expect(p.has(PERMISSIONS.TICKETS_ASSIGN)).toBe(false);
       expect(p.has(PERMISSIONS.TICKETS_RESOLVE)).toBe(false);
       expect(p.has(PERMISSIONS.USERS_CREATE)).toBe(false);
+      expect(p.has(PERMISSIONS.AUDIT_READ)).toBe(true);
     });
 
     it('Service Advisor asigna y cierra, no cambia prioridad ni resuelve', () => {
