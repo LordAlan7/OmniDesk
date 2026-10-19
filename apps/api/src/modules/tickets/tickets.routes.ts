@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
+import { categoryUpdateSchema } from './tickets.schemas';
 import {
   assignmentSchema,
   closeSchema,
@@ -107,6 +108,18 @@ ticketsRouter.post('/tickets/:id/close', authenticate, async (req, res, next) =>
 ticketsRouter.get('/tickets/:id/history', authenticate, async (req, res, next) => {
   try {
     ok(res, await service.ticketHistory(parseId(req.params.id), currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.patch('/tickets/:id/category', authenticate, async (req, res, next) => {
+  try {
+    const { categoryId } = categoryUpdateSchema.parse(req.body);
+    ok(
+      res,
+      await service.updateCategory(parseId(req.params.id), categoryId, currentUser(req)),
+    );
   } catch (err) {
     next(err);
   }

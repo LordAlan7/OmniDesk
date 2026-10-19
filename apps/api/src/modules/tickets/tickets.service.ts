@@ -14,7 +14,7 @@ import {
   ticketsRepository as repo,
 } from './tickets.repository';
 import { Ticket, TicketStatus } from './tickets.types';
-import { assertStatusInvariants } from './tickets.lifecycle';
+import { assertStatusInvariants, canReclassify } from './tickets.lifecycle';
 
 const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   Open: ['Assigned'],
@@ -304,4 +304,46 @@ export async function ticketHistory(
 ): Promise<Awaited<ReturnType<typeof repo.historyOf>>> {
   await getTicketForUser(id, user);
   return repo.historyOf(id);
+}
+
+export async function updateCategory(
+  id: number,
+  categoryId: number,
+  user: AuthUser,
+): Promise<Ticket> {
+  // Solo Service Advisor y Manager pueden reclasificar (NFR-001)
+  if (!can(user, PERMISSIONS.TICKETS_UPDATE) || !can(user, PERMISSIONS.TICKETS_READ_ALL)) {
+    throw Errors.forbidden('Solo asesores y gerentes pueden reclasificar tickets.');
+  }
+
+  const ticket = await getTicketForUser(id, user);
+  canReclassify(ticket); // Valida que no esté cerrado
+
+  if (ticket.categoryId === categoryId) {
+    return ticket; // No hay cambio, no registramos historial
+  }
+
+  const from = ticket.categoryId;
+  ticket.categoryId = categoryId;
+
+  const saved = await repo.save(ticket);
+  Object.assign(ticket, saved);
+
+  await repo.addHistory({
+    ticketId: id,
+    actorId: user.id,
+    action: 'category_changed',
+    from,
+    to: categoryId,
+  });
+
+  recordAudit({
+    action: 'ticket.category_changed',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+    metadata: { from, to: categoryId },
+  });
+
+  return ticket;
 }
