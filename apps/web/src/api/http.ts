@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-const BASE_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'
+const BASE_URL: string = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/$/, '')
 
 let accessToken: string | null = null
 let onUnauthorized: (() => void) | null = null
@@ -27,7 +27,8 @@ export const setUnauthorizedHandler = (handler: (() => void) | null): void => {
   onUnauthorized = handler
 }
 
-interface RequestOptions {
+export interface RequestOptions {
+  headers?: HeadersInit
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
   /** false en el login: ahí un 401 significa "credenciales incorrectas", no "sesión vencida". */
@@ -48,8 +49,10 @@ export interface ApiPage<T> {
 /** Única puerta de salida HTTP del frontend: token, errores comunes y 401 global viven aquí. */
 async function send<T>(path: string, options: RequestOptions): Promise<ApiPage<T> | undefined> {
   const { method = 'GET', body, auth = true } = options
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const headers: Record<string, string> = Object.fromEntries(new Headers(options.headers))
+  headers.Accept = 'application/json'
+  const form = body instanceof FormData
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json'
   if (auth && accessToken) headers['Authorization'] = `Bearer ${accessToken}`
 
   let response: Response
@@ -57,7 +60,7 @@ async function send<T>(path: string, options: RequestOptions): Promise<ApiPage<T
     response = await fetch(`${BASE_URL}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: form ? body : body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
     throw new ApiError(

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PoolClient } from 'pg';
+import type { DatabaseClient as PoolClient } from '../../shared/db/types';
 import { can, PERMISSIONS } from '../../shared/authorization';
 import { Errors } from '../../shared/errors';
 import type { AuthUser } from '../../shared/types';

@@ -39,7 +39,6 @@ export function assertStatusInvariants(ticket: Ticket): void {
 
   if (
     ticket.status !== 'Open' &&
-    ticket.status !== 'Assigned' &&
     ticket.assignedTechnicianId === null
   ) {
     throw Errors.invalidState(

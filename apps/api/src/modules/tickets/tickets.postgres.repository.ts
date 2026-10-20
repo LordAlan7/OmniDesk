@@ -1,26 +1,25 @@
-import type { PoolClient } from 'pg';
-import { getPool } from '../../shared/db/pool';
-import { Errors } from '../../shared/errors';
 import { assertStatusInvariants } from './tickets.lifecycle';
-import type { Ticket, TicketHistoryEntry, TicketStatus } from './tickets.types';
+import { Errors } from '../../shared/errors';
+import { getPool } from '../../shared/db/pool';
 import type { TicketFilter } from './tickets.repository';
+import type {
+  Ticket,
+  TicketHistoryEntry,
+} from './tickets.types';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Tipos de fila en PostgreSQL
-// ──────────────────────────────────────────────────────────────────────────────
 interface TicketRow {
   id: number;
   title: string;
   description: string;
   category_id: number;
+  store_location: string | null;
+  motorcycle_model: string | null;
   priority_id: number | null;
-  status: TicketStatus;
+  status: Ticket['status'];
   created_by: number;
   assigned_technician_id: number | null;
   due_date: Date | null;
   resolution: string | null;
-  store_location: string | null;      // NUEVO
-  motorcycle_model: string | null;     // NUEVO
   created_at: Date;
   updated_at: Date;
   resolved_at: Date | null;
@@ -35,9 +34,14 @@ interface HistoryRow {
   action: string;
   from_value: unknown;
   to_value: unknown;
+  reason: string | null;
   created_at: Date;
 }
 
+type HistoryInput = Omit<
+  TicketHistoryEntry,
+  'id' | 'createdAt' | 'ticketId'
+>;
 
 function toTicket(row: TicketRow): Ticket {
   return {
@@ -45,178 +49,128 @@ function toTicket(row: TicketRow): Ticket {
     title: row.title,
     description: row.description,
     categoryId: row.category_id,
+    storeLocation: row.store_location,
+    motorcycleModel: row.motorcycle_model,
     priorityId: row.priority_id,
     status: row.status,
     createdBy: row.created_by,
     assignedTechnicianId: row.assigned_technician_id,
-    dueDate: row.due_date ? row.due_date.toISOString() : null,
+    dueDate: row.due_date?.toISOString() ?? null,
     resolution: row.resolution,
-    storeLocation: row.store_location,       // NUEVO
-    motorcycleModel: row.motorcycle_model,    // NUEVO
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
-    resolvedAt: row.resolved_at ? row.resolved_at.toISOString() : null,
-    closedAt: row.closed_at ? row.closed_at.toISOString() : null,
+    resolvedAt: row.resolved_at?.toISOString() ?? null,
+    closedAt: row.closed_at?.toISOString() ?? null,
     version: row.version,
   };
 }
 
-function toHistory(row: HistoryRow): TicketHistoryEntry {
-  return {
-    id: row.id,
-    ticketId: row.ticket_id,
-    actorId: row.actor_id,
-    action: row.action,
-    from: row.from_value,
-    to: row.to_value,
-    createdAt: row.created_at.toISOString(),
-  };
-}
-
-const SELECT_TICKETS = `
-  SELECT
-    id, title, description, category_id, priority_id, status,
-    created_by, assigned_technician_id, due_date, resolution,
-    store_location, motorcycle_model,
-    created_at, updated_at, resolved_at, closed_at, version
-  FROM tickets
-`;
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Operaciones con transacción (críticas)
-// ──────────────────────────────────────────────────────────────────────────────
-async function withTransaction<T>(
-  operation: (client: PoolClient) => Promise<T>,
-): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-    const result = await operation(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (cause) {
-    await client.query('ROLLBACK');
-    throw cause;
-  } finally {
-    client.release();
-  }
-}
-
-async function findByIdWithClient(
-  client: PoolClient,
-  id: number,
-): Promise<Ticket | undefined> {
-  const result = await client.query<TicketRow>(
-    `${SELECT_TICKETS} WHERE id = $1`,
-    [id],
-  );
-  return result.rows[0] ? toTicket(result.rows[0]) : undefined;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// API pública del repositorio (equivalente a tickets.repository.ts)
-// ──────────────────────────────────────────────────────────────────────────────
-
 export const postgresTicketsRepository = {
-  // NUEVO: Listar categorías para el formulario
-  async listCategories() {
-    const result = await getPool().query('SELECT id, name FROM ticket_categories ORDER BY name');
+  async listCategories(): Promise<{ id: number; name: string }[]> {
+    const result = await getPool().query<{ id: number; name: string }>('SELECT id, name FROM ticket_categories ORDER BY id');
     return result.rows;
   },
-
   async create(
-    data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'>,
+    data: Pick<
+      Ticket,
+      'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'
+    >,
   ): Promise<Ticket> {
-    return withTransaction(async (client) => {
-      const category = await client.query(
-        'SELECT id FROM ticket_categories WHERE id = $1',
-        [data.categoryId],
-      );
-      if (category.rows.length === 0) {
-        throw Errors.validation([
-          { field: 'categoryId', message: 'La categoría no existe.' },
-        ]);
-      }
+    const client = await getPool().connect();
+
+    try {
+      await client.query('BEGIN');
 
       const result = await client.query<TicketRow>(
-        `INSERT INTO tickets
-           (title, description, category_id, created_by, status, version, store_location, motorcycle_model)
-         VALUES ($1, $2, $3, $4, 'Open', 1, $5, $6)
+        `INSERT INTO tickets (
+           title, description, category_id, created_by, store_location, motorcycle_model
+         )
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [data.title, data.description, data.categoryId, data.createdBy, data.storeLocation, data.motorcycleModel],
+        [
+          data.title,
+          data.description,
+          data.categoryId,
+          data.createdBy,
+          data.storeLocation,
+          data.motorcycleModel,
+        ],
       );
 
-      if (!result.rows[0]) {
+      const row = result.rows[0];
+
+      if (!row) {
         throw new Error('No se pudo crear el ticket.');
       }
 
-      return toTicket(result.rows[0]);
-    });
-  },
-
-  async findById(id: number): Promise<Ticket | undefined> {
-    const result = await getPool().query<TicketRow>(
-      `${SELECT_TICKETS} WHERE id = $1`,
-      [id],
-    );
-    return result.rows[0] ? toTicket(result.rows[0]) : undefined;
-  },
-
-  async list(filter: TicketFilter): Promise<Ticket[]> {
-    const conditions: string[] = [];
-    const values: unknown[] = [];
-
-    if (filter.visibleTo !== null) {
-      values.push(filter.visibleTo);
-      conditions.push(
-        `(created_by = $${values.length} OR assigned_technician_id = $${values.length})`,
+      await client.query(
+        `INSERT INTO ticket_history (
+           ticket_id, actor_id, action, to_value
+         )
+         VALUES ($1, $2, $3, $4::jsonb)`,
+        [
+          row.id,
+          data.createdBy,
+          'created',
+          JSON.stringify('Open'),
+        ],
       );
-    }
 
-    if (filter.status) {
-      values.push(filter.status);
-      conditions.push(`status = $${values.length}`);
-    }
+      await client.query('COMMIT');
+      return toTicket(row);
+    } catch (cause) {
+      await client.query('ROLLBACK');
 
-    if (filter.priorityId !== undefined) {
-      values.push(filter.priorityId);
-      conditions.push(`priority_id = $${values.length}`);
-    }
+      if (
+        typeof cause === 'object' &&
+        cause !== null &&
+        'code' in cause &&
+        cause.code === '23503' &&
+        'constraint' in cause &&
+        cause.constraint === 'tickets_category_id_fkey'
+      ) {
+        throw Errors.validation([
+          {
+            field: 'categoryId',
+            message: 'La categoría seleccionada no existe.',
+          },
+        ]);
+      }
 
-    if (filter.categoryId !== undefined) {
-      values.push(filter.categoryId);
-      conditions.push(`category_id = $${values.length}`);
+      throw cause;
+    } finally {
+      client.release();
     }
-
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const result = await getPool().query<TicketRow>(
-      `${SELECT_TICKETS} ${where} ORDER BY created_at DESC`,
-      values,
-    );
-    return result.rows.map(toTicket);
   },
 
-  async save(ticket: Ticket): Promise<Ticket> {
+  async saveWithHistory(
+    ticket: Ticket,
+    expectedVersion: number,
+    entries: HistoryInput[],
+  ): Promise<Ticket> {
     assertStatusInvariants(ticket);
+    const client = await getPool().connect();
 
-    return withTransaction(async (client) => {
+    try {
+      await client.query('BEGIN');
+
       const result = await client.query<TicketRow>(
         `UPDATE tickets
-           SET title = $1,
-               description = $2,
-               category_id = $3,
-               priority_id = $4,
-               status = $5,
-               assigned_technician_id = $6,
-               due_date = $7,
-               resolution = $8,
-               store_location = $9,
-               motorcycle_model = $10,
-               resolved_at = $11,
-               closed_at = $12,
-               updated_at = NOW(),
-               version = version + 1
-         WHERE id = $13
+         SET title = $1,
+             description = $2,
+             category_id = $3,
+             priority_id = $4,
+             status = $5,
+             assigned_technician_id = $6,
+             due_date = $7,
+             resolution = $8,
+             resolved_at = $9,
+             closed_at = $10,
+             store_location = $13,
+             motorcycle_model = $14,
+             updated_at = clock_timestamp(),
+             version = version + 1
+         WHERE id = $11 AND version = $12
          RETURNING *`,
         [
           ticket.title,
@@ -227,53 +181,145 @@ export const postgresTicketsRepository = {
           ticket.assignedTechnicianId,
           ticket.dueDate,
           ticket.resolution,
-          ticket.storeLocation,
-          ticket.motorcycleModel,
           ticket.resolvedAt,
           ticket.closedAt,
           ticket.id,
+          expectedVersion,
+          ticket.storeLocation,
+          ticket.motorcycleModel,
         ],
       );
 
-      if (!result.rows[0]) {
-        throw Errors.notFound('Ticket');
+      const row = result.rows[0];
+
+      if (!row) {
+        throw Errors.conflict(
+          'El ticket cambió. Actualiza la información antes de guardar.',
+        );
       }
 
-      return toTicket(result.rows[0]);
-    });
+      for (const entry of entries) {
+        await client.query(
+          `INSERT INTO ticket_history (
+             ticket_id,
+             actor_id,
+             action,
+             from_value,
+             to_value,
+             reason
+           )
+           VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)`,
+          [
+            ticket.id,
+            entry.actorId,
+            entry.action,
+            JSON.stringify(entry.from ?? null),
+            JSON.stringify(entry.to ?? null),
+            entry.reason ?? null,
+          ],
+        );
+      }
+
+      await client.query('COMMIT');
+      return toTicket(row);
+    } catch (cause) {
+      await client.query('ROLLBACK');
+      if (
+        typeof cause === 'object' &&
+        cause !== null &&
+        'code' in cause &&
+        cause.code === '23503' &&
+        'constraint' in cause &&
+        cause.constraint === 'tickets_category_id_fkey'
+      ) {
+        throw Errors.validation([
+          {
+            field: 'categoryId',
+            message: 'La categoría seleccionada no existe.',
+          },
+        ]);
+      }
+
+      throw cause;
+    } finally {
+      client.release();
+    }
   },
 
-  async addHistory(
-    entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>,
-  ): Promise<TicketHistoryEntry> {
-    const result = await getPool().query<HistoryRow>(
-      `INSERT INTO ticket_history
-         (ticket_id, actor_id, action, from_value, to_value)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
+  async findById(
+    id: number,
+  ): Promise<Ticket | undefined> {
+    const result = await getPool().query<TicketRow>(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id],
+    );
+
+    const row = result.rows[0];
+    return row ? toTicket(row) : undefined;
+  },
+
+  async list(filter: TicketFilter): Promise<Ticket[]> {
+    const result = await getPool().query<TicketRow>(
+      `SELECT *
+       FROM tickets
+       WHERE (
+         $1::integer IS NULL
+         OR created_by = $1
+         OR assigned_technician_id = $1
+       )
+         AND ($2::text IS NULL OR status = $2)
+         AND ($3::integer IS NULL OR priority_id = $3)
+         AND ($4::integer IS NULL OR category_id = $4)
+       ORDER BY id DESC`,
       [
-        entry.ticketId,
-        entry.actorId,
-        entry.action,
-        entry.from ?? null,
-        entry.to ?? null,
+        filter.visibleTo,
+        filter.status ?? null,
+        filter.priorityId ?? null,
+        filter.categoryId ?? null,
       ],
     );
 
-    if (!result.rows[0]) {
-      throw new Error('No se pudo registrar el historial del ticket.');
-    }
-
-    return toHistory(result.rows[0]);
+    return result.rows.map(toTicket);
   },
 
-  async historyOf(ticketId: number): Promise<TicketHistoryEntry[]> {
+  async historyOf(
+    ticketId: number,
+  ): Promise<TicketHistoryEntry[]> {
     const result = await getPool().query<HistoryRow>(
-      `SELECT * FROM ticket_history
+      `SELECT *
+       FROM ticket_history
        WHERE ticket_id = $1
-       ORDER BY created_at ASC`,
+       ORDER BY id`,
       [ticketId],
     );
-    return result.rows.map(toHistory);
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      ticketId: row.ticket_id,
+      actorId: row.actor_id,
+      action: row.action,
+      from: row.from_value,
+      to: row.to_value,
+      reason: row.reason,
+      createdAt: row.created_at.toISOString(),
+    }));
+  },
+
+  async hasPendingTickets(
+    technicianId: number,
+  ): Promise<boolean> {
+    const result = await getPool().query<{
+      pending: boolean;
+    }>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM tickets
+         WHERE assigned_technician_id = $1
+           AND status <> 'Closed'
+       ) AS pending`,
+      [technicianId],
+    );
+
+    return result.rows[0]?.pending ?? false;
   },
 };

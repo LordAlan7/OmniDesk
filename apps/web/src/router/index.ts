@@ -40,8 +40,14 @@ const router = createRouter({
       name: 'tickets',
       component: () => import('@/views/TicketsView.vue'),
       meta: {
-        permissions: ['tickets:read:own', 'tickets:read:all'],
+        permissions: ['tickets:read', 'tickets:read:own', 'tickets:read:all'],
       },
+    },
+    {
+      path: '/tickets/:id',
+      name: 'ticket-detail',
+      component: () => import('@/views/TicketDetailView.vue'),
+      meta: { permissions: ['tickets:read', 'tickets:read:own', 'tickets:read:all'] },
     },
     {
       path: '/tickets/new',
@@ -54,7 +60,7 @@ const router = createRouter({
     {
       path: '/admin/users',
       name: 'admin-users',
-      component: () => import('@/views/AdminUsersView.vue'),
+      redirect: { name: 'users' },
       meta: {
         permissions: ['users:manage'],
       },

@@ -72,6 +72,175 @@ describe('users - FR-002', () => {
     return response.body.data.accessToken as string;
   }
 
+    it('reassignment transfers access and rejects self-assignment and stale versions', async () => {
+    const first = await createAccount(['Technician']);
+    const second = await createAccount(['Technician']);
+
+    const firstToken = await loginAccount(first.data.email);
+    const secondToken = await loginAccount(second.data.email);
+
+    const created = await request(app)
+      .post('/api/v1/tickets')
+      .set(bearer(employee))
+      .send({
+        title: 'Prueba de acceso por reasignacion',
+        description: 'Verificar transferencia de responsable.',
+        categoryId: 2,
+      });
+
+    expect(created.status).toBe(201);
+
+    const ticketId = created.body.data.id;
+    const endpoint = `/api/v1/tickets/${ticketId}`;
+    const initialVersion = created.body.data.version;
+
+    // El técnico no puede asignarse el ticket directamente.
+    const selfAssignment = await request(app)
+      .patch(`${endpoint}/assignment`)
+      .set(bearer(firstToken))
+      .send({
+        technicianId: first.user.id,
+        expectedVersion: initialVersion,
+      });
+
+    expect(selfAssignment.status).toBe(403);
+
+    // El asesor asigna al primer técnico.
+    const assigned = await request(app)
+      .patch(`${endpoint}/assignment`)
+      .set(bearer(advisor))
+      .send({
+        technicianId: first.user.id,
+        expectedVersion: initialVersion,
+      });
+
+    expect(assigned.status).toBe(200);
+
+    const firstAccess = await request(app)
+      .get(endpoint)
+      .set(bearer(firstToken));
+
+    expect(firstAccess.status).toBe(200);
+
+    const secondBefore = await request(app)
+      .get(endpoint)
+      .set(bearer(secondToken));
+
+    expect(secondBefore.status).toBe(404);
+
+    // El asesor cambia al segundo técnico.
+    const reassigned = await request(app)
+      .patch(`${endpoint}/assignment`)
+      .set(bearer(advisor))
+      .send({
+        technicianId: second.user.id,
+        expectedVersion: assigned.body.data.version,
+        reason: 'Transferencia de prueba entre tecnicos.',
+      });
+
+    expect(reassigned.status).toBe(200);
+    expect(reassigned.body.data.assignedTechnicianId)
+      .toBe(second.user.id);
+
+    // El nuevo responsable obtiene acceso.
+    const secondAccess = await request(app)
+      .get(endpoint)
+      .set(bearer(secondToken));
+
+    expect(secondAccess.status).toBe(200);
+
+    // Una asignación histórica no conserva el acceso.
+    const firstAfter = await request(app)
+      .get(endpoint)
+      .set(bearer(firstToken));
+
+    expect(firstAfter.status).toBe(404);
+
+    const firstHistory = await request(app)
+      .get(`${endpoint}/history`)
+      .set(bearer(firstToken));
+
+    expect(firstHistory.status).toBe(404);
+
+    // Los listados reflejan al responsable actual.
+    const firstList = await request(app)
+      .get('/api/v1/tickets?page=1&limit=100')
+      .set(bearer(firstToken));
+
+    const secondList = await request(app)
+      .get('/api/v1/tickets?page=1&limit=100')
+      .set(bearer(secondToken));
+
+    expect(firstList.status).toBe(200);
+    expect(secondList.status).toBe(200);
+
+    expect(
+      firstList.body.data.some(
+        (ticket: { id: number }) => ticket.id === ticketId,
+      ),
+    ).toBe(false);
+
+    expect(
+      secondList.body.data.some(
+        (ticket: { id: number }) => ticket.id === ticketId,
+      ),
+    ).toBe(true);
+
+    const historyBefore = await request(app)
+      .get(`${endpoint}/history`)
+      .set(bearer(advisor));
+
+    expect(historyBefore.status).toBe(200);
+
+    // Reutilizar la versión anterior debe fallar.
+    const stale = await request(app)
+      .patch(`${endpoint}/assignment`)
+      .set(bearer(advisor))
+      .send({
+        technicianId: first.user.id,
+        expectedVersion: assigned.body.data.version,
+      });
+
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('CONFLICT');
+
+    const historyAfter = await request(app)
+      .get(`${endpoint}/history`)
+      .set(bearer(advisor));
+
+    expect(historyAfter.status).toBe(200);
+    expect(historyAfter.body.data)
+      .toEqual(historyBefore.body.data);
+
+    const events = historyAfter.body.data as {
+      action: string;
+      from: unknown;
+      to: unknown;
+      reason: string | null;
+    }[];
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'assigned',
+          from: first.user.id,
+          to: second.user.id,
+          reason: 'Transferencia de prueba entre tecnicos.',
+        }),
+      ]),
+    );
+
+    const finalTicket = await request(app)
+      .get(endpoint)
+      .set(bearer(advisor));
+
+    expect(finalTicket.status).toBe(200);
+    expect(finalTicket.body.data.assignedTechnicianId)
+      .toBe(second.user.id);
+    expect(finalTicket.body.data.version)
+      .toBe(reassigned.body.data.version);
+  });
+
   it('requires authentication and denies employee access', async () => {
     const anonymous = await request(app)
       .get('/api/v1/users');
@@ -420,10 +589,13 @@ describe('users - FR-002', () => {
     expect(created.status).toBe(201);
     const ticketId = created.body.data.id;
 
-    const assigned = await request(app)
+       const assigned = await request(app)
       .patch(`/api/v1/tickets/${ticketId}/assignment`)
       .set(bearer(advisor))
-      .send({ technicianId: user.id });
+      .send({
+        technicianId: user.id,
+        expectedVersion: created.body.data.version,
+      });
 
     expect(assigned.status).toBe(200);
 

@@ -103,6 +103,8 @@ export const prioritySchema = z
 
 export const assignmentSchema = z
   .object({
+    expectedVersion: z.number().int().positive(),
+    reason: z.string().trim().min(1).max(1000).optional(),
     technicianId: z
       .number()
       .int()

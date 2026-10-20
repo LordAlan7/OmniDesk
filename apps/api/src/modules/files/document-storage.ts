@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import type { PoolClient } from 'pg';
+import type { DatabaseClient as PoolClient } from '../../shared/db/types';
 import { PDFDocument, PDFName, PDFDict, PDFArray, PDFStream } from 'pdf-lib';
 import { AppError, Errors } from '../../shared/errors';
 

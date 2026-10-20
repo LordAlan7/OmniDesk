@@ -64,7 +64,7 @@ ticketsRouter.patch('/tickets/:id/priority', authenticate, async (req, res, next
 
 ticketsRouter.patch('/tickets/:id/assignment', authenticate, async (req, res, next) => {
   try {
-    const { technicianId, dueDate } = assignmentSchema.parse(req.body);
+    const { technicianId, dueDate, expectedVersion, reason } = assignmentSchema.parse(req.body);
     ok(
       res,
       await service.assignTechnician(
@@ -72,6 +72,7 @@ ticketsRouter.patch('/tickets/:id/assignment', authenticate, async (req, res, ne
         technicianId,
         dueDate,
         currentUser(req),
+        { expectedVersion, reason },
       ),
     );
   } catch (err) {
@@ -112,4 +113,8 @@ ticketsRouter.get('/tickets/:id/history', authenticate, async (req, res, next) =
   } catch (err) {
     next(err);
   }
+});
+
+ticketsRouter.get('/tickets/:id/eligible-technicians', authenticate, async (req, res) => {
+  ok(res, await service.eligibleTechnicians(parseId(req.params.id), currentUser(req)));
 });
