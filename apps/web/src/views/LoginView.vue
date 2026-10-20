@@ -1,3 +1,4 @@
+
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -255,6 +256,14 @@ button:disabled {
   border-radius: 8px;
   overflow-wrap: anywhere;
   margin: 0;
+}
+
+.info {
+  color: #2457a7;
+  background: #edf4ff;
+  padding: 12px;
+  border-radius: 8px;
+  line-height: 1.5;
 }
 
 .info {

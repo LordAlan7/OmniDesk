@@ -27,7 +27,6 @@ import {
   findUserById,
   configurePendingTicketsChecker,
 } from './modules/users';
-
 export function createApp() {
   configureAccountResolver(findUserById);
 

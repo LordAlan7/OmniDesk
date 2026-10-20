@@ -45,4 +45,10 @@ export function assertStatusInvariants(ticket: Ticket): void {
       `Un ticket en "${ticket.status}" requiere un técnico asignado.`,
     );
   }
+  
+}
+export function canReclassify(ticket: Ticket): void {
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se puede cambiar la categoría de un ticket cerrado.');
+  }
 }
