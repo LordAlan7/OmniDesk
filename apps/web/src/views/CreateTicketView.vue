@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink } from 'vue-router'
 import { ApiError } from '../services/api'
 import { createTicket, getCategories, type Category } from '../services/tickets'
 
-const router = useRouter()
 const saving = ref(false)
 const error = ref('')
 const successId = ref<number | null>(null)
@@ -24,6 +23,8 @@ const fieldErrors = reactive({
   title: '',
   description: '',
   categoryId: '',
+  storeLocation: '',
+  motorcycleModel: '',
 })
 
 async function loadCategories() {
@@ -44,7 +45,10 @@ function validate(): boolean {
   fieldErrors.description = form.description.trim().length >= 1 ? '' : 'La descripción es obligatoria.'
   fieldErrors.categoryId = form.categoryId ? '' : 'Selecciona una categoría.'
 
-  if (fieldErrors.title || fieldErrors.description || fieldErrors.categoryId) {
+  fieldErrors.storeLocation = form.storeLocation.trim() ? '' : 'La tienda o ubicación es obligatoria.'
+  fieldErrors.motorcycleModel = form.motorcycleModel.trim() ? '' : 'El modelo de motocicleta es obligatorio.'
+
+  if (Object.values(fieldErrors).some(Boolean)) {
     isValid = false
   }
   return isValid
@@ -65,8 +69,8 @@ async function submit() {
       title: form.title.trim(),
       description: form.description.trim(),
       categoryId: form.categoryId,
-      storeLocation: form.storeLocation.trim() || null,
-      motorcycleModel: form.motorcycleModel.trim() || null,
+      storeLocation: form.storeLocation.trim(),
+      motorcycleModel: form.motorcycleModel.trim(),
     }
     const response = await createTicket(payload)
     successId.value = response.data.id
@@ -78,6 +82,7 @@ async function submit() {
     form.storeLocation = ''
     form.motorcycleModel = ''
   } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Ocurrió un error al crear el ticket.'
     if (cause instanceof ApiError && cause.details && Array.isArray(cause.details)) {
       cause.details.forEach((detail: any) => {
         if (detail.field && typeof detail.message === 'string') {
@@ -164,27 +169,33 @@ onMounted(loadCategories)
             </div>
 
             <div class="form-group">
-              <label for="storeLocation">Tienda o ubicación</label>
+              <label for="storeLocation">Tienda o ubicación *</label>
               <input
                 id="storeLocation"
                 v-model="form.storeLocation"
                 type="text"
                 maxlength="200"
                 :disabled="saving"
-                placeholder="Ej. Sucursal Centro (Opcional)"
+                placeholder="Ej. Sucursal Centro"
+                required
+                :aria-invalid="!!fieldErrors.storeLocation"
               />
+              <span v-if="fieldErrors.storeLocation" class="error-text">{{ fieldErrors.storeLocation }}</span>
             </div>
 
             <div class="form-group">
-              <label for="motorcycleModel">Modelo de motocicleta</label>
+              <label for="motorcycleModel">Modelo de motocicleta *</label>
               <input
                 id="motorcycleModel"
                 v-model="form.motorcycleModel"
                 type="text"
                 maxlength="200"
                 :disabled="saving"
-                placeholder="Ej. Italika FT150 (Opcional)"
+                placeholder="Ej. Italika FT150"
+                required
+                :aria-invalid="!!fieldErrors.motorcycleModel"
               />
+              <span v-if="fieldErrors.motorcycleModel" class="error-text">{{ fieldErrors.motorcycleModel }}</span>
             </div>
           </div>
 

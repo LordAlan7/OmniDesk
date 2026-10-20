@@ -18,7 +18,7 @@ export interface Ticket {
   status: TicketStatus
   createdBy: number
   assignedTechnicianId: number | null
-    assignedTechnicianName?: string | null
+  assignedTechnicianName?: string | null
   dueDate: string | null
   resolution: string | null
   createdAt: string
@@ -115,12 +115,12 @@ export interface CreateTicketPayload {
   title: string
   description: string
   categoryId: number
-  storeLocation?: string | null
-  motorcycleModel?: string | null
+  storeLocation: string
+  motorcycleModel: string
 }
 
 
-export const getCategories = () => apiRequest<Category[]>('/tickets/categories')
+export const getCategories = () => apiRequest<Category[]>('/ticket-categories')
 
 export async function createTicket(payload: CreateTicketPayload) {
   // Generamos una clave única para esta petición.
@@ -134,5 +134,23 @@ export async function createTicket(payload: CreateTicketPayload) {
       'Idempotency-Key': idempotencyKey,
     },
     body: JSON.stringify(payload),
+  })
+}
+
+
+export async function changeTicketCategory(id: number, categoryId: number): Promise<void> {
+  await apiRequest(`/tickets/${id}/category`, {
+    method: 'PATCH',
+    body: JSON.stringify({ categoryId }),
+  })
+}
+
+export async function updateBusinessInformation(
+  id: number,
+  input: { storeLocation?: string; motorcycleModel?: string; version: number },
+): Promise<void> {
+  await apiRequest(`/tickets/${id}/business-information`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
   })
 }
