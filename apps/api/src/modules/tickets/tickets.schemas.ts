@@ -32,6 +32,8 @@ export const prioritySchema = z.object({
 
 export const assignmentSchema = z.object({
   technicianId: z.number().int().positive(),
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(1).max(1000).optional(),
   dueDate: z.string().datetime().optional(),
 });
 

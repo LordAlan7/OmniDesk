@@ -1,3 +1,4 @@
+import { env } from '../../config/env';
 import { Errors } from '../../shared/errors';
 import { AuthUser } from '../../shared/types';
 import {
@@ -10,12 +11,30 @@ import { recordAudit } from '../audit';
 import { notify } from '../notifications';
 import {
   isActiveTechnician,
+  listActiveTechnicians,
   withTechnicianLifecycleLock,
+  findUserById,
 } from '../users';
-import { TicketFilter, ticketsRepository as repo } from './tickets.repository';
-import { Ticket, TicketStatus } from './tickets.types';
+import {
+  TicketFilter,
+  ticketsRepository as memory,
+} from './tickets.repository';
+import {
+  postgresTicketsRepository as postgres,
+} from './tickets.postgres.repository';
+import {
+  Ticket,
+  TicketHistoryEntry,
+  TicketStatus,
+} from './tickets.types';
 
-/** Máquina de estados del ticket (provisional, ver tickets.types.ts). */
+const useMemory = env.nodeEnv === 'test';
+
+type HistoryInput = Omit<
+  TicketHistoryEntry,
+  'id' | 'createdAt' | 'ticketId'
+>;
+
 const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   Open: ['Assigned'],
   Assigned: ['In Progress'],
@@ -24,89 +43,240 @@ const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   Closed: [],
 };
 
-/** Obtiene un ticket verificando que el usuario tenga permiso de verlo (RBAC + propiedad).
- *  404 (no 403) para no revelar que existe un ticket ajeno. */
-export function getTicketForUser(id: number, user: AuthUser): Ticket {
-  const ticket = repo.findById(id);
-  if (!ticket || !canAccessTicket(ticket, user)) throw Errors.notFound('Ticket');
-  return ticket;
+async function withTechnicianName(
+  ticket: Ticket,
+): Promise<Ticket> {
+  const technician = ticket.assignedTechnicianId === null
+    ? undefined
+    : await findUserById(ticket.assignedTechnicianId);
+
+  return {
+    ...ticket,
+    assignedTechnicianName: technician?.name ?? null,
+  };
 }
 
-function mustBeAssignedTechnicianOrStaff(ticket: Ticket, user: AuthUser) {
-  const isAssignedTech = ticket.assignedTechnicianId === user.id;
-  const isStaff = can(user, PERMISSIONS.TICKETS_READ_ALL);
-  if (!isAssignedTech && !isStaff) throw Errors.forbidden();
-}
+export async function getTicketForUser(
+  id: number,
+  user: AuthUser,
+): Promise<Ticket> {
+  const ticket = useMemory
+    ? memory.findById(id)
+    : await postgres.findById(id);
 
-function moveTo(ticket: Ticket, to: TicketStatus, user: AuthUser): void {
-  if (!TRANSITIONS[ticket.status].includes(to)) {
-    throw Errors.invalidState(`A ticket cannot move from "${ticket.status}" to "${to}".`);
+  if (!ticket || !canAccessTicket(ticket, user)) {
+    throw Errors.notFound('Ticket');
   }
+
+  // Evita modificar el registro en memoria antes de validar.
+  return withTechnicianName(ticket);
+}
+
+async function saveWithHistory(
+  ticket: Ticket,
+  entries: HistoryInput[],
+): Promise<Ticket> {
+  if (!useMemory) {
+    const saved = await postgres.saveWithHistory(
+      ticket,
+      ticket.version,
+      entries,
+    );
+
+    return withTechnicianName(saved);
+  }
+
+  const current = memory.findById(ticket.id);
+
+  if (!current || current.version !== ticket.version) {
+    throw Errors.conflict(
+      'El ticket cambió. Actualiza la información antes de guardar.',
+    );
+  }
+
+  Object.assign(current, ticket, {
+    version: current.version + 1,
+  });
+
+  memory.save(current);
+
+  for (const entry of entries) {
+    memory.addHistory({
+      ...entry,
+      ticketId: current.id,
+    });
+  }
+
+   return withTechnicianName(current);
+}
+
+function mustBeAssignedTechnicianOrStaff(
+  ticket: Ticket,
+  user: AuthUser,
+): void {
+  const assigned = ticket.assignedTechnicianId === user.id;
+  const staff = can(user, PERMISSIONS.TICKETS_READ_ALL);
+
+  if (!assigned && !staff) throw Errors.forbidden();
+}
+
+function transition(
+  ticket: Ticket,
+  to: TicketStatus,
+  user: AuthUser,
+): HistoryInput {
+  if (!TRANSITIONS[ticket.status].includes(to)) {
+    throw Errors.invalidState(
+      `A ticket cannot move from "${ticket.status}" to "${to}".`,
+    );
+  }
+
   const from = ticket.status;
   ticket.status = to;
-  repo.save(ticket);
-  repo.addHistory({ ticketId: ticket.id, actorId: user.id, action: 'status_changed', from, to });
+
+  return {
+    actorId: user.id,
+    action: 'status_changed',
+    from,
+    to,
+  };
+}
+
+function publishStatus(
+  ticket: Ticket,
+  entry: HistoryInput,
+): void {
   recordAudit({
     action: 'ticket.status_changed',
     entity: 'ticket',
     entityId: ticket.id,
-    actorId: user.id,
-    metadata: { from, to },
+    actorId: entry.actorId,
+    metadata: { from: entry.from, to: entry.to },
   });
-  notify(ticket.createdBy, 'ticket.status_changed', `Your ticket #${ticket.id} is now "${to}".`, {
+
+  notify(
+    ticket.createdBy,
+    'ticket.status_changed',
+    `Your ticket #${ticket.id} is now "${ticket.status}".`,
+    { entity: 'ticket', id: ticket.id },
+  );
+}
+
+export async function createTicket(
+  data: {
+    title: string;
+    description: string;
+    categoryId: number;
+  },
+  user: AuthUser,
+): Promise<Ticket> {
+  if (!can(user, PERMISSIONS.TICKETS_CREATE)) {
+    throw Errors.forbidden();
+  }
+
+  const input = { ...data, createdBy: user.id };
+  const ticket = useMemory
+    ? memory.create(input)
+    : await postgres.create(input);
+
+  if (useMemory) {
+    memory.addHistory({
+      ticketId: ticket.id,
+      actorId: user.id,
+      action: 'created',
+      to: 'Open',
+    });
+  }
+
+  recordAudit({
+    action: 'ticket.created',
     entity: 'ticket',
-    id: ticket.id,
+    entityId: ticket.id,
+    actorId: user.id,
   });
+
+  return { ...ticket };
 }
 
-export function createTicket(
-  data: { title: string; description: string; categoryId: number },
+export async function listTickets(
   user: AuthUser,
-): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_CREATE)) throw Errors.forbidden();
-  const ticket = repo.create({ ...data, createdBy: user.id });
-  repo.addHistory({ ticketId: ticket.id, actorId: user.id, action: 'created', to: 'Open' });
-  recordAudit({ action: 'ticket.created', entity: 'ticket', entityId: ticket.id, actorId: user.id });
-  return ticket;
-}
-
-export function listTickets(
-  user: AuthUser,
-  q: { status?: TicketStatus; priorityId?: number; categoryId?: number },
-): Ticket[] {
-  // El repositorio ya no filtra por usuario: la visibilidad depende de más de
-  // un criterio (propiedad, asignación, rol con READ_ALL), así que se aplica
-  // el predicado de autorización aquí, antes de paginar.
+  q: {
+    status?: TicketStatus;
+    priorityId?: number;
+    categoryId?: number;
+  },
+): Promise<Ticket[]> {
   const filter: TicketFilter = { ...q, visibleTo: null };
-  return repo.list(filter).filter(ticketVisibilityFilter(user));
+  const tickets = useMemory
+    ? memory.list(filter)
+    : await postgres.list(filter);
+  return Promise.all(
+    tickets
+      .filter(ticketVisibilityFilter(user))
+      .map(withTechnicianName),
+  );
 }
 
-export function updateTicket(
+export async function updateTicket(
   id: number,
-  patch: { title?: string; description?: string; categoryId?: number },
+  patch: {
+    title?: string;
+    description?: string;
+    categoryId?: number;
+  },
   user: AuthUser,
-): Ticket {
-  const ticket = getTicketForUser(id, user);
-  const ownerEditing = ticket.createdBy === user.id && ticket.status === 'Open';
+): Promise<Ticket> {
+  const ticket = await getTicketForUser(id, user);
+
+  const ownerEditing =
+    ticket.createdBy === user.id && ticket.status === 'Open';
+
   const staffEditing =
-    can(user, PERMISSIONS.TICKETS_UPDATE) && can(user, PERMISSIONS.TICKETS_READ_ALL);
-  if (!ownerEditing && !staffEditing) throw Errors.forbidden();
+    can(user, PERMISSIONS.TICKETS_UPDATE) &&
+    can(user, PERMISSIONS.TICKETS_READ_ALL);
+
+  if (!ownerEditing && !staffEditing) {
+    throw Errors.forbidden();
+  }
+
   Object.assign(ticket, patch);
-  repo.save(ticket);
-  repo.addHistory({ ticketId: id, actorId: user.id, action: 'updated', to: patch });
-  recordAudit({ action: 'ticket.updated', entity: 'ticket', entityId: id, actorId: user.id });
-  return ticket;
+
+  const saved = await saveWithHistory(ticket, [{
+    actorId: user.id,
+    action: 'updated',
+    to: patch,
+  }]);
+
+  recordAudit({
+    action: 'ticket.updated',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+  });
+
+  return saved;
 }
 
-export function setPriority(id: number, priorityId: number, user: AuthUser): Ticket {
+export async function setPriority(
+  id: number,
+  priorityId: number,
+  user: AuthUser,
+): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_PRIORITY_UPDATE)) {
     throw Errors.forbidden('Only managers can set the priority.');
   }
-  const ticket = getTicketForUser(id, user);
+
+  const ticket = await getTicketForUser(id, user);
   const from = ticket.priorityId;
   ticket.priorityId = priorityId;
-  repo.save(ticket);
-  repo.addHistory({ ticketId: id, actorId: user.id, action: 'priority_changed', from, to: priorityId });
+
+  const saved = await saveWithHistory(ticket, [{
+    actorId: user.id,
+    action: 'priority_changed',
+    from,
+    to: priorityId,
+  }]);
+
   recordAudit({
     action: 'ticket.priority_changed',
     entity: 'ticket',
@@ -114,7 +284,8 @@ export function setPriority(id: number, priorityId: number, user: AuthUser): Tic
     actorId: user.id,
     metadata: { from, to: priorityId },
   });
-  return ticket;
+
+  return saved;
 }
 
 export async function assignTechnician(
@@ -122,6 +293,10 @@ export async function assignTechnician(
   technicianId: number,
   dueDate: string | undefined,
   user: AuthUser,
+  options: {
+    expectedVersion: number;
+    reason?: string;
+  },
 ): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_ASSIGN)) {
     throw Errors.forbidden(
@@ -141,9 +316,13 @@ export async function assignTechnician(
         ]);
       }
 
-      // Consultar el ticket después de esperar la validación,
-      // para trabajar con su estado actual.
-      const ticket = getTicketForUser(id, user);
+      const ticket = await getTicketForUser(id, user);
+
+      if (ticket.version !== options.expectedVersion) {
+        throw Errors.conflict(
+          'El ticket cambió. Actualiza la información antes de asignar.',
+        );
+      }
 
       if (
         ticket.status !== 'Open' &&
@@ -153,32 +332,64 @@ export async function assignTechnician(
           `A ticket in status "${ticket.status}" cannot be (re)assigned.`,
         );
       }
-
-      const from = ticket.assignedTechnicianId;
-
-      ticket.assignedTechnicianId = technicianId;
-      ticket.dueDate = dueDate ?? ticket.dueDate;
-
-      if (ticket.status === 'Open') {
-        moveTo(ticket, 'Assigned', user);
-      } else {
-        repo.save(ticket);
+      if (
+        dueDate !== undefined &&
+        (
+          ticket.dueDate === null ||
+          new Date(dueDate).getTime() !==
+            new Date(ticket.dueDate).getTime()
+        )
+      ) {
+        throw Errors.validation([
+          {
+            field: 'dueDate',
+            message:
+              'La asignación no permite modificar el plazo del ticket.',
+          },
+        ]);
       }
 
-      repo.addHistory({
-        ticketId: id,
+      if (ticket.assignedTechnicianId === technicianId) {
+        return ticket;
+      }
+
+      const from = ticket.assignedTechnicianId;
+      const entries: HistoryInput[] = [];
+
+      ticket.assignedTechnicianId = technicianId;
+
+      if (ticket.status === 'Open') {
+        entries.push(
+          transition(ticket, 'Assigned', user),
+        );
+      }
+
+      entries.push({
         actorId: user.id,
         action: 'assigned',
         from,
         to: technicianId,
+        reason: options.reason ?? null,
       });
+
+      const saved = await saveWithHistory(ticket, entries);
+
+      for (const entry of entries) {
+        if (entry.action === 'status_changed') {
+          publishStatus(saved, entry);
+        }
+      }
 
       recordAudit({
         action: 'ticket.assigned',
         entity: 'ticket',
         entityId: id,
         actorId: user.id,
-        metadata: { from, to: technicianId },
+        metadata: {
+          from,
+          to: technicianId,
+          reason: options.reason ?? null,
+        },
       });
 
       notify(
@@ -188,50 +399,128 @@ export async function assignTechnician(
         { entity: 'ticket', id },
       );
 
-      return ticket;
+      return saved;
     },
   );
 }
+export async function changeStatus(
+  id: number,
+  to: TicketStatus,
+  user: AuthUser,
+): Promise<Ticket> {
+  if (!can(user, PERMISSIONS.TICKETS_STATUS_UPDATE)) {
+    throw Errors.forbidden();
+  }
 
-export function changeStatus(id: number, to: TicketStatus, user: AuthUser): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_STATUS_UPDATE)) throw Errors.forbidden();
-  const ticket = getTicketForUser(id, user);
+  const ticket = await getTicketForUser(id, user);
   mustBeAssignedTechnicianOrStaff(ticket, user);
-  if (to === 'Assigned' || to === 'Resolved' || to === 'Closed') {
+
+  if (
+    to === 'Assigned' ||
+    to === 'Resolved' ||
+    to === 'Closed'
+  ) {
     throw Errors.validation([
       {
         field: 'status',
-        message: `Use the dedicated endpoint for "${to}" (assignment / resolution / close).`,
+        message:
+          `Use the dedicated endpoint for "${to}" (assignment / resolution / close).`,
       },
     ]);
   }
-  moveTo(ticket, to, user);
-  return ticket;
+
+  const entry = transition(ticket, to, user);
+  const saved = await saveWithHistory(ticket, [entry]);
+
+  publishStatus(saved, entry);
+  return saved;
 }
 
-export function resolveTicket(id: number, resolution: string, user: AuthUser): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_RESOLVE)) throw Errors.forbidden();
-  const ticket = getTicketForUser(id, user);
+export async function resolveTicket(
+  id: number,
+  resolution: string,
+  user: AuthUser,
+): Promise<Ticket> {
+  if (!can(user, PERMISSIONS.TICKETS_RESOLVE)) {
+    throw Errors.forbidden();
+  }
+
+  const ticket = await getTicketForUser(id, user);
   mustBeAssignedTechnicianOrStaff(ticket, user);
-  moveTo(ticket, 'Resolved', user);
+
+  const entry = transition(ticket, 'Resolved', user);
+
   ticket.resolution = resolution;
   ticket.resolvedAt = new Date().toISOString();
-  repo.save(ticket);
-  return ticket;
+
+  const saved = await saveWithHistory(ticket, [entry]);
+
+  publishStatus(saved, entry);
+  return saved;
 }
 
-export function closeTicket(id: number, comment: string | undefined, user: AuthUser): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_CLOSE)) throw Errors.forbidden();
-  const ticket = getTicketForUser(id, user);
+export async function closeTicket(
+  id: number,
+  comment: string | undefined,
+  user: AuthUser,
+): Promise<Ticket> {
+  if (!can(user, PERMISSIONS.TICKETS_CLOSE)) {
+    throw Errors.forbidden();
+  }
+
+  const ticket = await getTicketForUser(id, user);
   mustBeAssignedTechnicianOrStaff(ticket, user);
-  moveTo(ticket, 'Closed', user);
+
+  const entry = transition(ticket, 'Closed', user);
   ticket.closedAt = new Date().toISOString();
-  repo.save(ticket);
-  if (comment) repo.addHistory({ ticketId: id, actorId: user.id, action: 'closed_comment', to: comment });
-  return ticket;
+
+  const entries: HistoryInput[] = [entry];
+
+  if (comment) {
+    entries.push({
+      actorId: user.id,
+      action: 'closed_comment',
+      to: comment,
+    });
+  }
+
+  const saved = await saveWithHistory(ticket, entries);
+
+  publishStatus(saved, entry);
+  return saved;
 }
 
-export function ticketHistory(id: number, user: AuthUser) {
-  getTicketForUser(id, user);
-  return repo.historyOf(id);
+export async function ticketHistory(
+  id: number,
+  user: AuthUser,
+): Promise<TicketHistoryEntry[]> {
+  await getTicketForUser(id, user);
+
+  return useMemory
+    ? memory.historyOf(id)
+    : postgres.historyOf(id);
+}
+
+export async function eligibleTechnicians(
+  id: number,
+  user: AuthUser,
+): Promise<{ id: number; name: string }[]> {
+  if (!can(user, PERMISSIONS.TICKETS_ASSIGN)) {
+    throw Errors.forbidden(
+      'Only service advisors can assign tickets.',
+    );
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
+  if (
+    ticket.status !== 'Open' &&
+    ticket.status !== 'Assigned'
+  ) {
+    throw Errors.invalidState(
+      `A ticket in status "${ticket.status}" cannot be (re)assigned.`,
+    );
+  }
+
+  return listActiveTechnicians();
 }

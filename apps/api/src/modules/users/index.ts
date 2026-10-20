@@ -7,6 +7,7 @@ export {
   verifyCredentials,
   findUserById,
   isActiveTechnician,
+  listActiveTechnicians,
 } from './users.service';
 
 export {

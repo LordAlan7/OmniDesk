@@ -251,3 +251,19 @@ export async function setUserRoles(
 ): Promise<PublicUser> {
   return updateUser(id, { roles }, actorId);
 }
+
+export async function listActiveTechnicians(): Promise<
+  { id: number; name: string }[]
+> {
+  const users = await listUsers();
+
+  return users
+    .filter(
+      (user) =>
+        user.active && user.roles.includes('Technician'),
+    )
+    .map((user) => ({
+      id: user.id,
+      name: user.name,
+    }));
+}

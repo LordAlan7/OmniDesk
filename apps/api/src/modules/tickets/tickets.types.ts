@@ -1,11 +1,24 @@
 /**
- * Estados y prioridades PROVISIONALES: las categorías, niveles de prioridad y ciclo de vida
- * exactos siguen como preguntas abiertas #1 y #2 del documento. Ajustar tras validarlos.
+ * Estados y prioridades provisionales.
+ * Pendientes de validación con las reglas del proyecto.
  */
-export const TICKET_STATUSES = ['Open', 'Assigned', 'In Progress', 'Resolved', 'Closed'] as const;
-export type TicketStatus = (typeof TICKET_STATUSES)[number];
+export const TICKET_STATUSES = [
+  'Open',
+  'Assigned',
+  'In Progress',
+  'Resolved',
+  'Closed',
+] as const;
 
-export const PRIORITIES: Record<number, string> = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' };
+export type TicketStatus =
+  (typeof TICKET_STATUSES)[number];
+
+export const PRIORITIES: Record<number, string> = {
+  1: 'Low',
+  2: 'Medium',
+  3: 'High',
+  4: 'Critical',
+};
 
 export interface Ticket {
   id: number;
@@ -16,12 +29,14 @@ export interface Ticket {
   status: TicketStatus;
   createdBy: number;
   assignedTechnicianId: number | null;
+  assignedTechnicianName?: string | null;
   dueDate: string | null;
   resolution: string | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
   closedAt: string | null;
+  version: number;
 }
 
 export interface TicketHistoryEntry {
@@ -31,5 +46,6 @@ export interface TicketHistoryEntry {
   action: string;
   from?: unknown;
   to?: unknown;
+  reason?: string | null;
   createdAt: string;
 }

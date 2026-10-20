@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import TicketsView from '../views/TicketsView.vue'
+import TicketDetailView from '../views/TicketDetailView.vue'
 import DocumentsView from '../views/DocumentsView.vue'
 import LoginView from '../views/LoginView.vue'
 import UsersView from '../views/UsersView.vue'
@@ -13,7 +15,6 @@ import {
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/knowledge/documents', name: 'documents', component: DocumentsView, meta: { requiresAuth: true, permissions: ['knowledge:read'] } },
     {
       path: '/',
       redirect: '/users',
@@ -27,6 +28,33 @@ const router = createRouter({
       path: '/access-denied',
       name: 'access-denied',
       component: AccessDeniedView,
+    },
+    {
+      path: '/tickets',
+      name: 'tickets',
+      component: TicketsView,
+      meta: {
+        requiresAuth: true,
+        permissions: ['tickets:read'],
+      },
+    },
+    {
+      path: '/tickets/:id',
+      name: 'ticket-detail',
+      component: TicketDetailView,
+      meta: {
+        requiresAuth: true,
+        permissions: ['tickets:read'],
+      },
+    },
+    {
+      path: '/knowledge/documents',
+      name: 'documents',
+      component: DocumentsView,
+      meta: {
+        requiresAuth: true,
+        permissions: ['knowledge:read'],
+      },
     },
     {
       path: '/users',

@@ -1,7 +1,11 @@
-import { Ticket, TicketHistoryEntry, TicketStatus } from './tickets.types';
+import {
+  Ticket,
+  TicketHistoryEntry,
+  TicketStatus,
+} from './tickets.types';
 
 export interface TicketFilter {
-  /** Si es null, ve todos los tickets; si no, solo los propios/asignados a ese usuario. */
+  /** null permite consultar todos; otro valor limita a propios/asignados. */
   visibleTo: number | null;
   status?: TicketStatus;
   priorityId?: number;
@@ -9,16 +13,24 @@ export interface TicketFilter {
 }
 
 /**
- * Repositorio EN MEMORIA (esqueleto). Mantén esta interfaz al migrar a PostgreSQL.
+ * Repositorio en memoria.
+ * Se conserva para las pruebas al integrar PostgreSQL.
  */
 const tickets: Ticket[] = [];
 const history: TicketHistoryEntry[] = [];
+
 let nextTicketId = 1;
 let nextHistoryId = 1;
 
 export const ticketsRepository = {
-  create(data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy'>): Ticket {
+  create(
+    data: Pick<
+      Ticket,
+      'title' | 'description' | 'categoryId' | 'createdBy'
+    >,
+  ): Ticket {
     const now = new Date().toISOString();
+
     const ticket: Ticket = {
       id: nextTicketId++,
       ...data,
@@ -31,23 +43,38 @@ export const ticketsRepository = {
       updatedAt: now,
       resolvedAt: null,
       closedAt: null,
+      version: 1,
     };
+
     tickets.push(ticket);
     return ticket;
   },
 
-  findById: (id: number) => tickets.find((t) => t.id === id),
+  findById(id: number): Ticket | undefined {
+    return tickets.find((ticket) => ticket.id === id);
+  },
 
   list(filter: TicketFilter): Ticket[] {
     return tickets
       .filter(
-        (t) =>
-          (filter.visibleTo === null ||
-            t.createdBy === filter.visibleTo ||
-            t.assignedTechnicianId === filter.visibleTo) &&
-          (!filter.status || t.status === filter.status) &&
-          (filter.priorityId === undefined || t.priorityId === filter.priorityId) &&
-          (filter.categoryId === undefined || t.categoryId === filter.categoryId),
+        (ticket) =>
+          (
+            filter.visibleTo === null ||
+            ticket.createdBy === filter.visibleTo ||
+            ticket.assignedTechnicianId === filter.visibleTo
+          ) &&
+          (
+            !filter.status ||
+            ticket.status === filter.status
+          ) &&
+          (
+            filter.priorityId === undefined ||
+            ticket.priorityId === filter.priorityId
+          ) &&
+          (
+            filter.categoryId === undefined ||
+            ticket.categoryId === filter.categoryId
+          ),
       )
       .reverse();
   },
@@ -57,11 +84,22 @@ export const ticketsRepository = {
     return ticket;
   },
 
-  addHistory(entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>): TicketHistoryEntry {
-    const record = { ...entry, id: nextHistoryId++, createdAt: new Date().toISOString() };
+  addHistory(
+    entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>,
+  ): TicketHistoryEntry {
+    const record: TicketHistoryEntry = {
+      ...entry,
+      id: nextHistoryId++,
+      createdAt: new Date().toISOString(),
+    };
+
     history.push(record);
     return record;
   },
 
-  historyOf: (ticketId: number) => history.filter((h) => h.ticketId === ticketId),
+  historyOf(ticketId: number): TicketHistoryEntry[] {
+    return history.filter(
+      (entry) => entry.ticketId === ticketId,
+    );
+  },
 };
