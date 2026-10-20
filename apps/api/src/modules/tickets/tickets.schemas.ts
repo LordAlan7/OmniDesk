@@ -1,9 +1,6 @@
 import { z } from 'zod';
 import { paginationSchema } from '../../shared/http';
-import {
-  STRING_LIMITS,
-  MESSAGES,
-} from '../../shared/validation';
+import { STRING_LIMITS, MESSAGES } from '../../shared/validation';
 import { PRIORITIES, TICKET_STATUSES } from './tickets.types';
 
 const priorityIds = Object.keys(PRIORITIES).map(Number);
@@ -19,41 +16,32 @@ export const createTicketSchema = z
     title: z
       .string()
       .trim()
-      .min(
-        STRING_LIMITS.ticketTitle.min,
-        MESSAGES.tooShort('El título', STRING_LIMITS.ticketTitle.min),
-      )
-      .max(
-        STRING_LIMITS.ticketTitle.max,
-        MESSAGES.tooLong('El título', STRING_LIMITS.ticketTitle.max),
-      ),
+      .min(STRING_LIMITS.ticketTitle.min, MESSAGES.tooShort('El título', STRING_LIMITS.ticketTitle.min))
+      .max(STRING_LIMITS.ticketTitle.max, MESSAGES.tooLong('El título', STRING_LIMITS.ticketTitle.max)),
     description: z
       .string()
       .trim()
-      .min(
-        STRING_LIMITS.ticketDescription.min,
-        MESSAGES.required('La descripción'),
-      )
-      .max(
-        STRING_LIMITS.ticketDescription.max,
-        MESSAGES.tooLong('La descripción', STRING_LIMITS.ticketDescription.max),
-      ),
+      .min(STRING_LIMITS.ticketDescription.min, MESSAGES.required('La descripción'))
+      .max(STRING_LIMITS.ticketDescription.max, MESSAGES.tooLong('La descripción', STRING_LIMITS.ticketDescription.max)),
     categoryId: z
       .number()
       .int()
       .positive(MESSAGES.positiveInt('categoryId')),
-      
-    // NUEVOS CAMPOS FR-010:
+    // NUEVO: Campos opcionales de negocio (FR-010)
     storeLocation: z
       .string()
       .trim()
-      .min(businessLocationLimits.min, MESSAGES.required('La tienda o ubicación'))
-      .max(businessLocationLimits.max, MESSAGES.tooLong('La tienda', businessLocationLimits.max)),
+      .max(200)
+      .optional()
+      .nullable()
+      .transform(v => v || null),
     motorcycleModel: z
       .string()
       .trim()
-      .min(motorcycleModelLimits.min, MESSAGES.required('El modelo de motocicleta'))
-      .max(motorcycleModelLimits.max, MESSAGES.tooLong('El modelo de motocicleta', motorcycleModelLimits.max)),
+      .max(200)
+      .optional()
+      .nullable()
+      .transform(v => v || null),
   })
   .strict();
 
@@ -145,6 +133,8 @@ export const prioritySchema = z
 
 export const assignmentSchema = z
   .object({
+    expectedVersion: z.number().int().positive(),
+    reason: z.string().trim().min(1).max(1000).optional(),
     technicianId: z
       .number()
       .int()
@@ -190,14 +180,5 @@ export const closeSchema = z
         MESSAGES.tooLong('El comentario', STRING_LIMITS.ticketCloseComment.max),
       )
       .optional(),
-  })
-  .strict();
-
-export const categoryUpdateSchema = z
-  .object({
-    categoryId: z
-      .number()
-      .int()
-      .positive(MESSAGES.positiveInt('categoryId')),
   })
   .strict();

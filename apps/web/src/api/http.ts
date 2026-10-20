@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-const BASE_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'
+const BASE_URL: string = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/$/, '')
 
 let accessToken: string | null = null
 let onUnauthorized: (() => void) | null = null
@@ -27,17 +27,32 @@ export const setUnauthorizedHandler = (handler: (() => void) | null): void => {
   onUnauthorized = handler
 }
 
-interface RequestOptions {
+export interface RequestOptions {
+  headers?: HeadersInit
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
   /** false en el login: ahí un 401 significa "credenciales incorrectas", no "sesión vencida". */
   auth?: boolean
 }
 
-export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export interface PageMeta {
+  page: number
+  limit: number
+  total: number
+}
+
+export interface ApiPage<T> {
+  data: T
+  meta?: PageMeta
+}
+
+/** Única puerta de salida HTTP del frontend: token, errores comunes y 401 global viven aquí. */
+async function send<T>(path: string, options: RequestOptions): Promise<ApiPage<T> | undefined> {
   const { method = 'GET', body, auth = true } = options
-  const headers: Record<string, string> = {}
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const headers: Record<string, string> = Object.fromEntries(new Headers(options.headers))
+  headers.Accept = 'application/json'
+  const form = body instanceof FormData
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json'
   if (auth && accessToken) headers['Authorization'] = `Bearer ${accessToken}`
 
   let response: Response
@@ -45,13 +60,18 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     response = await fetch(`${BASE_URL}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: form ? body : body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', 'No se pudo conectar con el servidor.', 'network')
+    throw new ApiError(
+      0,
+      'NETWORK_ERROR',
+      'No se pudo conectar con el servidor. Comprueba que el backend esté ejecutándose.',
+      'network',
+    )
   }
 
-  if (response.status === 204) return undefined as T
+  if (response.status === 204) return undefined
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
@@ -65,5 +85,24 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
       e?.details,
     )
   }
-  return payload.data as T
+  if (!payload || typeof payload !== 'object' || !('data' in payload)) {
+    throw new ApiError(
+      response.status,
+      'INVALID_RESPONSE',
+      'El servidor devolvió una respuesta inesperada.',
+      'server',
+    )
+  }
+  return payload as ApiPage<T>
+}
+
+/** Devuelve solo `data`. */
+export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const result = await send<T>(path, options)
+  return result?.data as T
+}
+
+/** Devuelve `data` y `meta` de paginación (listados). */
+export async function apiPage<T>(path: string, options: RequestOptions = {}): Promise<ApiPage<T>> {
+  return (await send<T>(path, options)) as ApiPage<T>
 }

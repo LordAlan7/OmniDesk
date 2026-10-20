@@ -3,4 +3,5 @@
  * API pública: otros módulos SOLO deben importar desde este archivo.
  */
 export { notificationsRouter } from './notifications.routes';
-export { notify } from './notifications.service';
+export { notify, registerChannel } from './notifications.service';
+export type { NotificationChannel, Notification } from './notifications.service';

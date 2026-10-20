@@ -1,3 +1,5 @@
+import { Errors } from '../../shared/errors';
+import { assertStatusInvariants } from './tickets.lifecycle';
 import { env } from '../../config/env';
 import { Ticket, TicketHistoryEntry, TicketStatus } from './tickets.types';
 import { postgresTicketsRepository } from './tickets.postgres.repository';
@@ -18,9 +20,22 @@ let nextTicketId = 1;
 let nextHistoryId = 1;
 
 const ticketsMemoryRepository = {
+
+    async listCategories() {
+    return [
+      { id: 1, name: 'Acceso' },
+      { id: 2, name: 'Hardware' },
+      { id: 3, name: 'Software' },
+      { id: 4, name: 'Red' }
+    ];
+  },
+
   async create(
     data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'>,
   ): Promise<Ticket> {
+    if (![1, 2, 3, 4].includes(data.categoryId)) {
+      throw Errors.validation([{ field: 'categoryId', message: 'La categoría seleccionada no existe.' }]);
+    }
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: nextTicketId++,
@@ -35,6 +50,8 @@ const ticketsMemoryRepository = {
       assignedTechnicianId: null,
       dueDate: null,
       resolution: null,
+      storeLocation: data.storeLocation || null,     // NUEVO
+      motorcycleModel: data.motorcycleModel || null, // NUEVO
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,
@@ -42,7 +59,8 @@ const ticketsMemoryRepository = {
       version: 1,
     };
     tickets.push(ticket);
-    return ticket;
+    history.push({ id: nextHistoryId++, ticketId: ticket.id, actorId: data.createdBy, action: 'created', to: 'Open', createdAt: now });
+    return { ...ticket };
   },
 
   async findById(id: number): Promise<Ticket | undefined> {
@@ -62,6 +80,23 @@ const ticketsMemoryRepository = {
       )
       .slice()
       .reverse();
+  },
+
+  async saveWithHistory(ticket: Ticket, expectedVersion: number, entries: Omit<TicketHistoryEntry, 'id' | 'createdAt' | 'ticketId'>[]): Promise<Ticket> {
+    assertStatusInvariants(ticket);
+    const current = tickets.find(t => t.id === ticket.id);
+    if (!current || current.version !== expectedVersion) {
+      throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
+    }
+    if (![1, 2, 3, 4].includes(ticket.categoryId)) {
+      throw Errors.validation([{ field: 'categoryId', message: 'La categoría seleccionada no existe.' }]);
+    }
+    const now = new Date().toISOString();
+    Object.assign(current, ticket, { version: expectedVersion + 1, updatedAt: now });
+    for (const entry of entries) {
+      history.push({ ...entry, ticketId: current.id, id: nextHistoryId++, createdAt: now });
+    }
+    return { ...current };
   },
 
   async save(ticket: Ticket): Promise<Ticket> {
@@ -95,3 +130,10 @@ const useMemory = env.nodeEnv === 'test';
 export const ticketsRepository = useMemory
   ? ticketsMemoryRepository
   : postgresTicketsRepository;
+
+  export function resetTicketsRepository(): void {
+  tickets.length = 0;
+  history.length = 0;
+  nextTicketId = 1;
+  nextHistoryId = 1;
+}

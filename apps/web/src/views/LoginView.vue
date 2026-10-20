@@ -265,4 +265,12 @@ button:disabled {
   border-radius: 8px;
   line-height: 1.5;
 }
+
+.info {
+  color: #2457a7;
+  background: #edf4ff;
+  padding: 12px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
 </style>

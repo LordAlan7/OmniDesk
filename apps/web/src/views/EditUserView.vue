@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { ApiError } from '../services/api'
+import { ApiError } from '@/api/http'
 import { useFormAccess } from '../composables/useFormAccess'
 import {
   getUser,

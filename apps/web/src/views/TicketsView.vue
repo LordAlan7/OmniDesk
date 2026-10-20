@@ -1,27 +1,263 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { api, ApiError } from '@/api/http'
+import { hasPermission } from '../services/session'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
+import { ApiError } from '../services/api'
+import {
+  clearSession,
+  sessionUser,
+} from '../services/session'
+import {
+  listTickets,
+  type Ticket,
+  type TicketStatus,
+} from '../services/tickets'
 
-interface Ticket { id: number; title: string; status: string }
+const router = useRouter()
 const tickets = ref<Ticket[]>([])
+const status = ref<TicketStatus | ''>('')
+const page = ref(1)
+const limit = 10
+const total = ref(0)
+const loading = ref(false)
 const error = ref('')
 
-onMounted(async () => {
-  try {
-    tickets.value = await api<Ticket[]>('/tickets')
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 401) return // el manejador global redirige al login
-    error.value = 'No se pudieron cargar los tickets.'
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(total.value / limit)),
+)
+
+const statuses: { value: TicketStatus; label: string }[] = [
+  { value: 'Open', label: 'Abierto' },
+  { value: 'Assigned', label: 'Asignado' },
+  { value: 'In Progress', label: 'En progreso' },
+  { value: 'Resolved', label: 'Resuelto' },
+  { value: 'Closed', label: 'Cerrado' },
+]
+
+function statusLabel(value: TicketStatus): string {
+  return statuses.find((item) => item.value === value)?.label ?? value
+}
+
+function technicianLabel(id: number | null): string {
+  if (id === null) return 'Sin asignar'
+
+  if (id === sessionUser.value?.id) {
+    return `${sessionUser.value.name} (tú)`
   }
+
+  return `Técnico #${id}`
+}
+
+async function loadTickets() {
+  if (loading.value) return
+
+  loading.value = true
+  error.value = ''
+  tickets.value = []
+  total.value = 0
+
+  try {
+    const response = await listTickets(
+      page.value,
+      limit,
+      status.value || undefined,
+    )
+
+    tickets.value = response.data
+    total.value = response.meta?.total ?? response.data.length
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 401) {
+      clearSession()
+      await router.replace('/login')
+      return
+    }
+
+    if (cause instanceof ApiError && cause.status === 403) {
+      await router.replace('/access-denied')
+      return
+    }
+
+    error.value = cause instanceof Error
+      ? cause.message
+      : 'No se pudieron cargar los tickets.'
+  } finally {
+    loading.value = false
+  }
+}
+
+function applyFilters() {
+  page.value = 1
+  void loadTickets()
+}
+
+function changePage(next: number) {
+  if (loading.value || next < 1 || next > totalPages.value) return
+
+  page.value = next
+  void loadTickets()
+}
+
+onMounted(() => {
+  void loadTickets()
 })
 </script>
 
 <template>
-  <section class="card">
-    <h1>Tickets</h1>
-    <p v-if="error" class="error">{{ error }}</p>
-    <ul data-testid="ticket-list">
-      <li v-for="t in tickets" :key="t.id">#{{ t.id }} · {{ t.title }} ({{ t.status }})</li>
-    </ul>
-  </section>
+  <RouterLink v-if="hasPermission('tickets:create')" :to="{ name: 'create-ticket' }">Crear ticket</RouterLink>
+  <main class="tickets-page">
+    <header>
+      <span class="brand">OmniDesk</span>
+      <h1>Tickets de soporte</h1>
+      <p>Consulta los tickets a los que tienes acceso y su responsable actual.</p>
+    </header>
+
+    <section class="card" :aria-busy="loading">
+      <form class="filters" @submit.prevent="applyFilters">
+        <label for="ticket-status">Estado</label>
+
+        <select
+          id="ticket-status"
+          v-model="status"
+          :disabled="loading"
+        >
+          <option value="">Todos los estados</option>
+          <option
+            v-for="item in statuses"
+            :key="item.value"
+            :value="item.value"
+          >
+            {{ item.label }}
+          </option>
+        </select>
+
+        <button :disabled="loading">Consultar</button>
+      </form>
+
+      <p v-if="loading" role="status">Cargando tickets…</p>
+
+      <div v-else-if="error" class="error" role="alert">
+        <p>{{ error }}</p>
+        <button @click="loadTickets">Reintentar</button>
+      </div>
+
+      <template v-else>
+        <p v-if="tickets.length === 0">
+          No hay tickets visibles con estos criterios.
+        </p>
+
+        <div v-else class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Ticket</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Técnico asignado</th>
+                <th scope="col">Detalle</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="ticket in tickets" :key="ticket.id">
+                <td>
+                  <strong>#{{ ticket.id }}</strong>
+                  {{ ticket.title }}
+                </td>
+                <td>{{ statusLabel(ticket.status) }}</td>
+               <td>
+  {{
+    ticket.assignedTechnicianName
+      || technicianLabel(ticket.assignedTechnicianId)
+  }}
+</td>
+                <td>
+                  <RouterLink :to="`/tickets/${ticket.id}`">
+                    Ver ticket
+                  </RouterLink>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <footer>
+          <span>
+            {{ total }} tickets · Página {{ page }} de {{ totalPages }}
+          </span>
+          <div class="pagination">
+            <button
+              :disabled="page <= 1"
+              @click="changePage(page - 1)"
+            >
+              Anterior
+            </button>
+            <button
+              :disabled="page >= totalPages"
+              @click="changePage(page + 1)"
+            >
+              Siguiente
+            </button>
+          </div>
+        </footer>
+      </template>
+    </section>
+  </main>
 </template>
+
+<style scoped>
+.tickets-page {
+  min-height: 100vh;
+  padding: 32px;
+  background: #f8f9ff;
+  color: #182338;
+  font-family: Arial, sans-serif;
+}
+header, .card {
+  max-width: 1200px;
+  margin: 0 auto 24px;
+}
+.brand {
+  color: #2457d6;
+  font-size: 24px;
+  font-weight: 700;
+}
+header p { color: #5f6b7a; line-height: 1.5; }
+.card {
+  padding: 24px;
+  border: 1px solid #dce3ee;
+  border-radius: 14px;
+  background: white;
+}
+.filters, footer, .pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.filters { margin-bottom: 24px; }
+footer { justify-content: space-between; margin-top: 24px; }
+select, button {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font: inherit;
+}
+select { border: 1px solid #b7c3d4; background: white; }
+button {
+  border: 1px solid #2457d6;
+  background: #2457d6;
+  color: white;
+  cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: default; }
+a { color: #2457d6; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th, td { padding: 16px 12px; border-bottom: 1px solid #e4e9f1; }
+th { background: #f8f9ff; color: #5f6b7a; }
+.error { padding: 16px; background: #fff0f0; color: #a52121; }
+button:focus-visible, select:focus-visible, a:focus-visible {
+  outline: 2px solid #2457d6;
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  .tickets-page { padding: 16px; }
+}
+</style>

@@ -1,25 +1,17 @@
-import { readonly, ref } from 'vue'
-import {
-  ApiError,
-  apiRequest,
-  clearToken,
-  getToken,
-} from './api'
+import { computed } from 'vue'
+import { readStoredToken, useSessionStore, type SessionUser } from '@/stores/session'
+import { api, ApiError, setAccessToken } from '@/api/http'
 
-export interface SessionUser {
-  id: number
-  name: string
-  email: string
-  roles: string[]
-  permissions: string[]
-}
+export type { SessionUser }
 
-const currentUser = ref<SessionUser | null>(null)
-
-export const sessionUser = readonly(currentUser)
+/**
+ * Adaptador sobre el store de sesión (Pinia): las vistas de usuarios y el resto
+ * de la app comparten una única sesión y un único token (`omnidesk.token`).
+ */
+export const sessionUser = computed(() => useSessionStore().user)
 
 export function hasPermission(permission: string): boolean {
-  return currentUser.value?.permissions.includes(permission) ?? false
+  return useSessionStore().user?.permissions.includes(permission) ?? false
 }
 
 export function hasEveryPermission(...permissions: string[]): boolean {
@@ -27,41 +19,37 @@ export function hasEveryPermission(...permissions: string[]): boolean {
 }
 
 export function clearSession(): void {
-  currentUser.value = null
-  clearToken()
+  useSessionStore().clear()
 }
 
 export async function refreshSession(): Promise<SessionUser | null> {
-  const token = getToken()
+  const session = useSessionStore()
+  const token = readStoredToken()
 
   // Retirar permisos anteriores mientras se valida la sesión.
-  currentUser.value = null
+  session.user = null
 
   if (!token) return null
+  setAccessToken(token)
 
   try {
-    const response = await apiRequest<SessionUser>('/auth/me')
+    const me = await api<SessionUser>('/auth/me')
 
     // Evitar restaurar una sesión que cambió durante la solicitud.
-    if (getToken() !== token) return null
+    if (readStoredToken() !== token) return null
 
-    if (
-      !response.data ||
-      !Array.isArray(response.data.permissions)
-    ) {
-      throw new Error(
-        'El servidor no devolvió los permisos de la cuenta.',
-      )
+    if (!me || !Array.isArray(me.permissions)) {
+      throw new Error('El servidor no devolvió los permisos de la cuenta.')
     }
 
-    currentUser.value = response.data
-    return response.data
+    session.user = me
+    return me
   } catch (cause) {
-    if (getToken() === token) {
-      currentUser.value = null
+    if (readStoredToken() === token) {
+      session.user = null
 
       if (cause instanceof ApiError && cause.status === 401) {
-        clearToken()
+        session.clear()
         return null
       }
     }

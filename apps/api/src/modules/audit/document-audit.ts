@@ -1,4 +1,4 @@
-import type { PoolClient } from 'pg';
+import type { DatabaseClient as PoolClient } from '../../shared/db/types';
 /** Persistent document events share the mutation's transaction. */
 export async function recordDocumentAudit(client: PoolClient, action: string, entityId: number,
   actorId: number, metadata: Record<string, unknown>) {

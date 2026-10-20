@@ -39,23 +39,10 @@ export function assertStatusInvariants(ticket: Ticket): void {
 
   if (
     ticket.status !== 'Open' &&
-    ticket.status !== 'Assigned' &&
     ticket.assignedTechnicianId === null
   ) {
     throw Errors.invalidState(
       `Un ticket en "${ticket.status}" requiere un técnico asignado.`,
-    );
-  }
-
-}
-/**
- * Valida si se puede cambiar la categoría de un ticket (FR-005).
- * No se permite reclasificar tickets cerrados.
- */
-export function canReclassify(ticket: Ticket): void {
-  if (ticket.status === 'Closed') {
-    throw Errors.invalidState(
-      'No se puede cambiar la categoría de un ticket cerrado.',
     );
   }
 }

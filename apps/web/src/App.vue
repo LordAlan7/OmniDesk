@@ -17,10 +17,13 @@ async function onLogout() {
   <header v-if="session.isAuthenticated && !route.meta.public" class="topbar">
     <strong>OmniDesk</strong>
 
-    <RouterLink :to="{ name: 'dashboard' }">Inicio</RouterLink>
+    <RouterLink :to="{ name: 'dashboard' }">
+      Inicio
+    </RouterLink>
 
+    <!-- Solo se muestran las opciones permitidas. El backend valida igualmente cada petición. -->
     <RouterLink
-      v-if="session.can('tickets:read:own', 'tickets:read:all')"
+      v-if="session.can('tickets:read', 'tickets:read:own', 'tickets:read:all')"
       :to="{ name: 'tickets' }"
       data-testid="nav-tickets"
     >
@@ -34,6 +37,8 @@ async function onLogout() {
     >
       Usuarios
     </RouterLink>
+
+    <RouterLink v-if="session.can('users:read:list') && !session.can('users:manage')" :to="{ name: 'users' }">Usuarios</RouterLink>
 
     <span class="spacer" />
 

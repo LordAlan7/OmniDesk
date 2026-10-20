@@ -6,7 +6,7 @@ import {
   ref,
 } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { ApiError } from '../services/api'
+import { ApiError } from '@/api/http'
 import {
   clearSession,
   hasEveryPermission,

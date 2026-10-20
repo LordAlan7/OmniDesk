@@ -7,3 +7,4 @@
  */
 export { aiRouter } from './ai.routes';
 export type { AIProvider, AIAnswer } from './providers/ai-provider';
+export { createAIProvider } from './providers';
