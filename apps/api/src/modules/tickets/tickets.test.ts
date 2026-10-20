@@ -123,11 +123,12 @@ describe('tickets - full workflow', () => {
   });
 });
 
-describe('stub modules', () => {
-  it('respond 501 in the standard error format', async () => {
+describe('knowledge module', () => {
+  it('lists articles (now implemented)', async () => {
     const token = await loginAs('employee@company.com');
     const res = await request(app).get('/api/v1/knowledge/articles').set(bearer(token));
-    expect(res.status).toBe(501);
-    expect(res.body.error.code).toBe('NOT_IMPLEMENTED');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toBeDefined();
+    expect(res.body.meta).toBeDefined();
   });
 });

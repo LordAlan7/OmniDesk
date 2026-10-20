@@ -62,6 +62,7 @@ para evitar inyección de campos reservados.
 | `status = "Assigned"` → `assignedTechnicianId` no null | `003_tickets_constraints.sql` + `tickets.lifecycle.ts` | ✅ Implementado |
 | Técnico con tickets pendientes no puede desactivarse | `users.lifecycle.ts` | ✅ Implementado |
 | No se puede reclasificar un ticket cerrado | `tickets.lifecycle.ts` | ✅ Implementado |
+| Artículos de conocimiento editan un estado `approved` y vuelven a `draft` si el editor no es Manager | `knowledge.service.ts` | ✅ Implementado |
 
 ### Roles válidos
 
@@ -106,6 +107,10 @@ Las transacciones se manejan con `BEGIN/COMMIT/ROLLBACK` en los repositorios Pos
 - ✅ Solo Service Advisor y Manager pueden reclasificar tickets.
 - ✅ No se permite reclasificar tickets cerrados.
 - ✅ El catálogo inicial de categorías es: Acceso, Hardware, Software, Red.
+- ✅ Los artículos de conocimiento usan el mismo catálogo de categorías que los tickets (temporalmente).
+- ✅ El flujo editorial es: `draft` → `approved` → `retired`.
+- ✅ Solo Manager puede aprobar/retirar. Technician y Manager pueden crear/editar.
+- ✅ Si un artículo aprobado es editado por alguien que no es Manager, vuelve a `draft`.
 
 ### Pendientes de confirmación con el stakeholder
 
