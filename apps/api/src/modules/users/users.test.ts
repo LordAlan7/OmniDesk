@@ -86,6 +86,8 @@ describe('users - FR-002', () => {
         title: 'Prueba de acceso por reasignacion',
         description: 'Verificar transferencia de responsable.',
         categoryId: 2,
+        storeLocation: 'Sucursal Centro',
+        motorcycleModel: 'Italika FT150' 
       });
 
     expect(created.status).toBe(201);
@@ -584,6 +586,8 @@ describe('users - FR-002', () => {
         title: 'Ticket para verificar protección del técnico',
         description: 'Caso de prueba de gestión de usuarios.',
         categoryId: 2,
+        storeLocation: 'Sucursal Sur',
+        motorcycleModel: 'Italika DM 150'
       });
 
     expect(created.status).toBe(201);

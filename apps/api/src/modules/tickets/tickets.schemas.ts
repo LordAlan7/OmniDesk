@@ -5,111 +5,25 @@ import { PRIORITIES, TICKET_STATUSES } from './tickets.types';
 
 const priorityIds = Object.keys(PRIORITIES).map(Number);
 
-// ──────────────────────────────────────────────────────────────────────────────
-// NUEVOS LÍMITES PARA FR-010
-// ──────────────────────────────────────────────────────────────────────────────
-const businessLocationLimits = { min: 1, max: 200 };
-const motorcycleModelLimits = { min: 1, max: 200 };
-
 export const createTicketSchema = z
   .object({
-    title: z
-      .string()
-      .trim()
-      .min(STRING_LIMITS.ticketTitle.min, MESSAGES.tooShort('El título', STRING_LIMITS.ticketTitle.min))
-      .max(STRING_LIMITS.ticketTitle.max, MESSAGES.tooLong('El título', STRING_LIMITS.ticketTitle.max)),
-    description: z
-      .string()
-      .trim()
-      .min(STRING_LIMITS.ticketDescription.min, MESSAGES.required('La descripción'))
-      .max(STRING_LIMITS.ticketDescription.max, MESSAGES.tooLong('La descripción', STRING_LIMITS.ticketDescription.max)),
-    categoryId: z
-      .number()
-      .int()
-      .positive(MESSAGES.positiveInt('categoryId')),
-    // NUEVO: Campos opcionales de negocio (FR-010)
-    storeLocation: z
-      .string()
-      .trim()
-      .max(200)
-      .optional()
-      .nullable()
-      .transform(v => v || null),
-    motorcycleModel: z
-      .string()
-      .trim()
-      .max(200)
-      .optional()
-      .nullable()
-      .transform(v => v || null),
+    title: z.string().trim().min(STRING_LIMITS.ticketTitle.min, MESSAGES.tooShort('El título', STRING_LIMITS.ticketTitle.min)).max(STRING_LIMITS.ticketTitle.max),
+    description: z.string().trim().min(STRING_LIMITS.ticketDescription.min, MESSAGES.required('La descripción')).max(STRING_LIMITS.ticketDescription.max),
+    categoryId: z.number().int().positive(MESSAGES.positiveInt('categoryId')),
+    storeLocation: z.string().trim().min(1, MESSAGES.required('La tienda o ubicación')).max(200),
+    motorcycleModel: z.string().trim().min(1, MESSAGES.required('El modelo de motocicleta')).max(200),
   })
   .strict();
 
 export const updateTicketSchema = z
   .object({
-    title: z
-      .string()
-      .trim()
-      .min(
-        STRING_LIMITS.ticketTitle.min,
-        MESSAGES.tooShort('El título', STRING_LIMITS.ticketTitle.min),
-      )
-      .max(
-        STRING_LIMITS.ticketTitle.max,
-        MESSAGES.tooLong('El título', STRING_LIMITS.ticketTitle.max),
-      )
-      .optional(),
-    description: z
-      .string()
-      .trim()
-      .min(
-        STRING_LIMITS.ticketDescription.min,
-        MESSAGES.required('La descripción'),
-      )
-      .max(
-        STRING_LIMITS.ticketDescription.max,
-        MESSAGES.tooLong('La descripción', STRING_LIMITS.ticketDescription.max),
-      )
-      .optional(),
-    categoryId: z
-      .number()
-      .int()
-      .positive(MESSAGES.positiveInt('categoryId'))
-      .optional(),
-    version: z
-      .number()
-      .int()
-      .positive(MESSAGES.positiveInt('version')),
+    title: z.string().trim().min(STRING_LIMITS.ticketTitle.min).max(STRING_LIMITS.ticketTitle.max).optional(),
+    description: z.string().trim().min(STRING_LIMITS.ticketDescription.min).max(STRING_LIMITS.ticketDescription.max).optional(),
+    categoryId: z.number().int().positive().optional(),
+    version: z.number().int().positive(MESSAGES.positiveInt('version')),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 1, { 
-    message: MESSAGES.noFieldsToUpdate,
-  });
-
-// NUEVO SCHEMA PARA FR-010:
-export const businessInfoUpdateSchema = z
-  .object({
-    storeLocation: z
-      .string()
-      .trim()
-      .min(businessLocationLimits.min, MESSAGES.required('La tienda o ubicación'))
-      .max(businessLocationLimits.max, MESSAGES.tooLong('La tienda', businessLocationLimits.max))
-      .optional(),
-    motorcycleModel: z
-      .string()
-      .trim()
-      .min(motorcycleModelLimits.min, MESSAGES.required('El modelo de motocicleta'))
-      .max(motorcycleModelLimits.max, MESSAGES.tooLong('El modelo de motocicleta', motorcycleModelLimits.max))
-      .optional(),
-    version: z
-      .number()
-      .int()
-      .positive(MESSAGES.positiveInt('version')),
-  })
-  .strict()
-  .refine((v) => Object.keys(v).length > 1, { 
-    message: MESSAGES.noFieldsToUpdate,
-  });
+  .refine((v) => Object.keys(v).length > 1, { message: MESSAGES.noFieldsToUpdate });
 
 export const listTicketsSchema = paginationSchema.extend({
   status: z.enum(TICKET_STATUSES).optional(),
@@ -119,66 +33,39 @@ export const listTicketsSchema = paginationSchema.extend({
 
 export const prioritySchema = z
   .object({
-    priorityId: z
-      .number()
-      .int()
-      .refine((n) => priorityIds.includes(n), {
-        message: MESSAGES.invalidEnum(
-          'priorityId',
-          priorityIds.map(String),
-        ),
-      }),
+    priorityId: z.number().int().refine((n) => priorityIds.includes(n), { message: MESSAGES.invalidEnum('priorityId', priorityIds.map(String)) }),
   })
   .strict();
 
 export const assignmentSchema = z
   .object({
-    expectedVersion: z.number().int().positive(),
-    reason: z.string().trim().min(1).max(1000).optional(),
-    technicianId: z
-      .number()
-      .int()
-      .positive(MESSAGES.positiveInt('technicianId')),
-    dueDate: z
-      .string()
-      .datetime(MESSAGES.invalidDate('dueDate'))
-      .optional(),
+    technicianId: z.number().int().positive(MESSAGES.positiveInt('technicianId')),
+    dueDate: z.string().datetime(MESSAGES.invalidDate('dueDate')).optional(),
+    expectedVersion: z.number().int().positive(MESSAGES.positiveInt('expectedVersion')),
+    reason: z.string().trim().max(500).optional(),
   })
   .strict();
 
 export const statusSchema = z
   .object({
-    status: z.enum(TICKET_STATUSES, {
-      message: MESSAGES.invalidEnum('status', TICKET_STATUSES),
-    }),
+    status: z.enum(TICKET_STATUSES, { message: MESSAGES.invalidEnum('status', TICKET_STATUSES) }),
   })
   .strict();
 
 export const resolutionSchema = z
   .object({
-    resolution: z
-      .string()
-      .trim()
-      .min(
-        STRING_LIMITS.ticketResolution.min,
-        MESSAGES.tooShort('La resolución', STRING_LIMITS.ticketResolution.min),
-      )
-      .max(
-        STRING_LIMITS.ticketResolution.max,
-        MESSAGES.tooLong('La resolución', STRING_LIMITS.ticketResolution.max),
-      ),
+    resolution: z.string().trim().min(STRING_LIMITS.ticketResolution.min).max(STRING_LIMITS.ticketResolution.max),
   })
   .strict();
 
 export const closeSchema = z
   .object({
-    comment: z
-      .string()
-      .trim()
-      .max(
-        STRING_LIMITS.ticketCloseComment.max,
-        MESSAGES.tooLong('El comentario', STRING_LIMITS.ticketCloseComment.max),
-      )
-      .optional(),
+    comment: z.string().trim().max(STRING_LIMITS.ticketCloseComment.max).optional(),
+  })
+  .strict();
+
+export const categoryUpdateSchema = z
+  .object({
+    categoryId: z.number().int().positive(MESSAGES.positiveInt('categoryId')),
   })
   .strict();

@@ -1,13 +1,22 @@
 import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
-import { createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema } from './tickets.schemas';
+import {
+  createTicketSchema,
+  listTicketsSchema,
+  updateTicketSchema,
+  prioritySchema,
+  assignmentSchema,
+  statusSchema,
+  resolutionSchema,
+  closeSchema,
+  categoryUpdateSchema,
+} from './tickets.schemas';
 import * as service from './tickets.service';
-import { businessInfoUpdateSchema } from './tickets.schemas';
 
 export const ticketsRouter = Router();
 
-// NUEVO: Endpoint para obtener categorías para el formulario
+// Endpoint para obtener categorías para el formulario
 ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) => {
   try {
     ok(res, await service.listCategories());
@@ -19,7 +28,6 @@ ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) =
 ticketsRouter.post('/tickets', authenticate, async (req, res, next) => {
   try {
     const body = createTicketSchema.parse(req.body);
-    // NUEVO: Extraer cabecera de idempotencia
     const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
     ok(res, await service.createTicket(body, currentUser(req), idempotencyKey), 201);
   } catch (err) {
@@ -30,7 +38,6 @@ ticketsRouter.post('/tickets', authenticate, async (req, res, next) => {
 ticketsRouter.get('/tickets', authenticate, async (req, res, next) => {
   try {
     const { page, limit, ...filters } = listTicketsSchema.parse(req.query);
-    // AQUÍ ESTABA EL ERROR: Faltaba el await
     paginated(res, await service.listTickets(currentUser(req), filters), page, limit);
   } catch (err) {
     next(err);
@@ -116,6 +123,17 @@ ticketsRouter.get('/tickets/:id/history', authenticate, async (req, res, next) =
   }
 });
 
-ticketsRouter.get('/tickets/:id/eligible-technicians', authenticate, async (req, res) => {
-  ok(res, await service.eligibleTechnicians(parseId(req.params.id), currentUser(req)));
+ticketsRouter.get('/tickets/:id/eligible-technicians', authenticate, async (req, res, next) => {
+  try {
+    ok(res, await service.eligibleTechnicians(parseId(req.params.id), currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.patch('/tickets/:id/category', authenticate, async (req, res, next) => {
+  try {
+    const { categoryId } = categoryUpdateSchema.parse(req.body);
+    ok(res, await service.updateCategory(parseId(req.params.id), categoryId, currentUser(req)));
+  } catch (err) { next(err); }
 });

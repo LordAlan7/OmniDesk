@@ -39,12 +39,7 @@ const ticketsMemoryRepository = {
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: nextTicketId++,
-      title: data.title,
-      description: data.description,
-      categoryId: data.categoryId,
-      createdBy: data.createdBy,
-      storeLocation: data.storeLocation,
-      motorcycleModel: data.motorcycleModel,
+      ...data,
       priorityId: null,
       status: 'Open',
       assignedTechnicianId: null,

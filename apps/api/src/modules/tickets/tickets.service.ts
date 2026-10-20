@@ -12,7 +12,7 @@ import {
   isActiveTechnician,
   listActiveTechnicians,
   withTechnicianLifecycleLock,
-  findUserById,
+  findUserById, 
 } from '../users';
 import {
   TicketFilter,
@@ -23,7 +23,7 @@ import {
   TicketHistoryEntry,
   TicketStatus,
 } from './tickets.types';
-
+import { assertStatusInvariants, canReclassify } from './tickets.lifecycle';
 
 
 const creations = new Map<string, { fingerprint: string; result: Promise<Ticket> }>();
@@ -188,44 +188,44 @@ export async function listTickets(
   );
 }
 
-export async function updateTicket(
+export async function updateCategory(
   id: number,
-  patch: {
-    title?: string;
-    description?: string;
-    categoryId?: number;
-    version: number;
-  },
+  categoryId: number,
   user: AuthUser,
 ): Promise<Ticket> {
-  const ticket = await getTicketForUser(id, user);
-
-  const ownerEditing =
-    ticket.createdBy === user.id && ticket.status === 'Open';
-
-  const staffEditing =
-    can(user, PERMISSIONS.TICKETS_UPDATE) &&
-    can(user, PERMISSIONS.TICKETS_READ_ALL);
-
-  if (!ownerEditing && !staffEditing) {
-    throw Errors.forbidden();
+  if (
+    !can(user, PERMISSIONS.TICKETS_UPDATE) ||
+    !can(user, PERMISSIONS.TICKETS_READ_ALL)
+  ) {
+    throw Errors.forbidden(
+      'Solo asesores y gerentes pueden reclasificar tickets.',
+    );
   }
 
-  if (ticket.version !== patch.version) throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
-  const { version: _version, ...changes } = patch;
-  Object.assign(ticket, changes);
+  const ticket = await getTicketForUser(id, user);
+  canReclassify(ticket);
 
-  const saved = await saveWithHistory(ticket, [{
-    actorId: user.id,
-    action: 'updated',
-    to: patch,
-  }]);
+  if (ticket.categoryId === categoryId) return ticket;
+
+  const from = ticket.categoryId;
+  ticket.categoryId = categoryId;
+
+  // Usamos la función interna saveWithHistory que ya envuelve a ticketsRepository
+  const saved = await saveWithHistory(ticket, [
+    {
+      actorId: user.id,
+      action: 'category_changed',
+      from,
+      to: categoryId,
+    },
+  ]);
 
   recordAudit({
-    action: 'ticket.updated',
+    action: 'ticket.category_changed',
     entity: 'ticket',
     entityId: id,
     actorId: user.id,
+    metadata: { from, to: categoryId },
   });
 
   return saved;
@@ -377,6 +377,7 @@ export async function assignTechnician(
     },
   );
 }
+
 export async function changeStatus(
   id: number,
   to: TicketStatus,
@@ -495,4 +496,50 @@ export async function eligibleTechnicians(
   }
 
   return listActiveTechnicians();
+}
+
+export async function updateTicket(
+  id: number,
+  patch: {
+    title?: string;
+    description?: string;
+    categoryId?: number;
+    version: number;
+  },
+  user: AuthUser,
+): Promise<Ticket> {
+  const ticket = await getTicketForUser(id, user);
+
+  const ownerEditing =
+    ticket.createdBy === user.id && ticket.status === 'Open';
+
+  const staffEditing =
+    can(user, PERMISSIONS.TICKETS_UPDATE) &&
+    can(user, PERMISSIONS.TICKETS_READ_ALL);
+
+  if (!ownerEditing && !staffEditing) {
+    throw Errors.forbidden();
+  }
+
+  if (ticket.version !== patch.version) {
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
+  }
+
+  const { version: _version, ...changes } = patch;
+  Object.assign(ticket, changes);
+
+  const saved = await saveWithHistory(ticket, [{
+    actorId: user.id,
+    action: 'updated',
+    to: patch,
+  }]);
+
+  recordAudit({
+    action: 'ticket.updated',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+  });
+
+  return saved;
 }
