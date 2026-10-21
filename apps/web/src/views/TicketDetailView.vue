@@ -9,6 +9,10 @@ import {
 } from '../services/session'
 import {
   assignTechnician,
+  getCategories,
+  changeTicketCategory,
+  updateBusinessInformation,
+  type Category,
   getEligibleTechnicians,
   getTicket,
   getTicketHistory,
@@ -57,6 +61,91 @@ const attachmentError = ref('')
 const attachmentSuccess = ref('')
 const selectedFile = ref<File | null>(null)
 
+
+const categories = ref<Category[]>([])
+const categoryId = ref(0)
+const storeLocation = ref('')
+const motorcycleModel = ref('')
+const editingInformation = ref(false)
+const informationError = ref('')
+const informationSuccess = ref('')
+const loadingInformation = ref(false)
+const canEditInformation = computed(() =>
+  !!ticket.value && ticket.value.status !== 'Closed' &&
+  (sessionUser.value?.roles.some(role => role === 'Service Advisor' || role === 'Manager') ?? false),
+)
+
+async function openInformation() {
+  if (!ticket.value || saving.value || loadingInformation.value || !canEditInformation.value) return
+  const sequence = loadSequence
+  loadingInformation.value = true
+  informationError.value = ''
+  informationSuccess.value = ''
+  try {
+    const result = await getCategories()
+    if (sequence !== loadSequence || !ticket.value) return
+    categories.value = result.data
+    categoryId.value = ticket.value.categoryId
+    storeLocation.value = ticket.value.storeLocation ?? ''
+    motorcycleModel.value = ticket.value.motorcycleModel ?? ''
+    editingInformation.value = true
+  } catch (cause) {
+    if (sequence !== loadSequence || await handleAccessError(cause)) return
+    informationError.value = cause instanceof Error ? cause.message : 'No se pudieron cargar las categorías.'
+  } finally {
+    loadingInformation.value = false
+  }
+}
+
+async function saveInformation(kind: 'category' | 'business') {
+  if (!ticket.value || saving.value || !canEditInformation.value) return
+  informationError.value = ''
+  informationSuccess.value = ''
+  if (kind === 'category' && !categories.value.some(item => item.id === categoryId.value)) {
+    informationError.value = 'Selecciona una categoría válida.'
+    return
+  }
+  if (kind === 'business' && (!storeLocation.value.trim() || !motorcycleModel.value.trim())) {
+    informationError.value = 'La tienda y el modelo son obligatorios.'
+    return
+  }
+  const sequence = loadSequence
+  const current = ticket.value
+  saving.value = true
+  let committed = false
+  try {
+    if (kind === 'category') {
+      await changeTicketCategory(current.id, categoryId.value)
+    } else {
+      await updateBusinessInformation(current.id, {
+        storeLocation: storeLocation.value.trim(),
+        motorcycleModel: motorcycleModel.value.trim(),
+        version: current.version,
+      })
+    }
+    committed = true
+    const refreshed = await getTicket(current.id)
+    if (sequence !== loadSequence) return
+    ticket.value = refreshed
+    editingInformation.value = false
+    informationSuccess.value = 'Cambio guardado correctamente.'
+    await loadHistory(current.id, sequence)
+  } catch (cause) {
+    if (sequence !== loadSequence || await handleAccessError(cause)) return
+    if (cause instanceof ApiError && cause.status === 409) {
+      await loadTicket()
+      informationError.value = 'El ticket cambió. Revisa los datos actuales y vuelve a editar.'
+    } else if (committed) {
+      editingInformation.value = false
+      ticket.value = null
+      error.value = 'El cambio se guardó, pero no se pudo actualizar el detalle. Pulsa Reintentar.'
+    } else {
+      informationError.value = cause instanceof Error ? cause.message : 'No se pudo guardar el cambio.'
+    }
+  } finally {
+    saving.value = false
+  }
+}
 
 let loadSequence = 0
 
@@ -240,6 +329,9 @@ async function loadTicket() {
   const sequence = ++loadSequence
   const id = Number(route.params.id)
 
+  editingInformation.value = false
+  informationError.value = ''
+  informationSuccess.value = ''
   ticket.value = null
   history.value = []
   candidates.value = []
@@ -269,6 +361,10 @@ async function loadTicket() {
 
     if (sequence !== loadSequence) return
 
+    if (!('version' in result)) {
+      await router.replace(`/my-tickets/${id}`)
+      return
+    }
     ticket.value = result
     
     // Cargar prioridades si el usuario puede priorizar
@@ -627,6 +723,35 @@ watch(
                 : 'Sin definir'
             }}
           </p>
+        </section>
+
+        <section class="card" :aria-busy="saving || loadingInformation">
+          <h2>Clasificación e información comercial</h2>
+          <p>Categoría: {{ categories.find(item => item.id === ticket?.categoryId)?.name ?? `#${ticket.categoryId}` }}</p>
+          <p>Tienda o ubicación: {{ ticket.storeLocation || 'Sin registrar' }}</p>
+          <p>Modelo de motocicleta: {{ ticket.motorcycleModel || 'Sin registrar' }}</p>
+          <p v-if="informationError" class="error" role="alert">{{ informationError }}</p>
+          <p v-if="informationSuccess" class="success" role="status">{{ informationSuccess }}</p>
+          <button v-if="canEditInformation && !editingInformation" :disabled="saving || loadingInformation" @click="openInformation">
+            {{ loadingInformation ? 'Cargando…' : 'Editar clasificación e información' }}
+          </button>
+          <template v-if="editingInformation && canEditInformation">
+            <form @submit.prevent="saveInformation('category')">
+              <label for="ticket-category">Categoría</label>
+              <select id="ticket-category" v-model="categoryId" required :disabled="saving">
+                <option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option>
+              </select>
+              <button :disabled="saving || categoryId === ticket.categoryId">Guardar categoría</button>
+            </form>
+            <form @submit.prevent="saveInformation('business')">
+              <label for="ticket-store">Tienda o ubicación *</label>
+              <input id="ticket-store" v-model="storeLocation" required maxlength="200" :disabled="saving" />
+              <label for="ticket-model">Modelo de motocicleta *</label>
+              <input id="ticket-model" v-model="motorcycleModel" required maxlength="200" :disabled="saving" />
+              <button :disabled="saving">Guardar información comercial</button>
+            </form>
+            <button class="secondary" :disabled="saving" @click="editingInformation = false">Cancelar</button>
+          </template>
         </section>
 
         <section
@@ -1073,6 +1198,7 @@ label {
   font-weight: 600;
 }
 
+input,
 select,
 textarea,
 button {
@@ -1081,6 +1207,7 @@ button {
   font: inherit;
 }
 
+input,
 select,
 textarea {
   width: 100%;
@@ -1142,6 +1269,7 @@ li p {
 }
 
 button:focus-visible,
+input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 a:focus-visible {

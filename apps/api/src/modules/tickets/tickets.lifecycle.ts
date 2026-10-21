@@ -1,5 +1,5 @@
 import { Errors } from '../../shared/errors';
-import { ticketsRepository } from './tickets.repository';
+import { ticketsRepository} from './tickets.repository';
 import type { Ticket } from './tickets.types';
 
 /** Pendiente = cualquier ticket asignado que todavía no esté cerrado. */
@@ -45,10 +45,11 @@ export function assertStatusInvariants(ticket: Ticket): void {
       `Un ticket en "${ticket.status}" requiere un técnico asignado.`,
     );
   }
-  
+
 }
 export function canReclassify(ticket: Ticket): void {
   if (ticket.status === 'Closed') {
     throw Errors.invalidState('No se puede cambiar la categoría de un ticket cerrado.');
   }
 }
+

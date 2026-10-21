@@ -48,7 +48,10 @@ const ticketsMemoryRepository = {
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: nextTicketId++,
-      ...data,
+      title: data.title,
+      description: data.description,
+      categoryId: data.categoryId,
+      createdBy: data.createdBy,
       priorityId: null,
       status: 'Open',
       assignedTechnicianId: null,
@@ -135,7 +138,7 @@ export const ticketsRepository = useMemory
   ? ticketsMemoryRepository
   : postgresTicketsRepository;
 
-  export function resetTicketsRepository(): void {
+export function resetTicketsRepository(): void {
   tickets.length = 0;
   history.length = 0;
   nextTicketId = 1;

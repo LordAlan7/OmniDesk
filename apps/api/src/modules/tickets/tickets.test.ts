@@ -1,13 +1,8 @@
 import request from 'supertest';
 import { app, bearer, loginAs } from '../../test-helpers';
 
-const newTicket = {
-  title: 'Unable to access the booking system',
-  description: 'Authentication error.',
-  categoryId: 2,
-  storeLocation: 'Sucursal Centro',
-  motorcycleModel: 'Italika FT150',
-};
+const newTicket = { title: 'Unable to access the booking system', description: 'Authentication error.', categoryId: 2, storeLocation: 'Sucursal Centro',
+  motorcycleModel: 'Italika FT150', };
 
 describe('tickets - full workflow', () => {
   let employee: string;
@@ -16,7 +11,7 @@ describe('tickets - full workflow', () => {
   let manager: string;
   let other: string;
   let ticketId: number;
-  
+
   async function assignmentBody(technicianId: number) {
     const response = await request(app)
       .get(`/api/v1/tickets/${ticketId}`)
@@ -254,12 +249,12 @@ describe('knowledge module', () => {
 });
 
 describe('FR-003 - Ticket Creation', () => {
-  const newTicket = { 
-    title: 'Falla de acceso', 
-    description: 'No puedo iniciar sesión en el sistema.', 
-    categoryId: 2, 
-    storeLocation: 'Sucursal Centro', 
-    motorcycleModel: 'Italika FT150' 
+  const newTicket = {
+    title: 'Falla de acceso',
+    description: 'No puedo iniciar sesión en el sistema.',
+    categoryId: 2,
+    storeLocation: 'Sucursal Centro',
+    motorcycleModel: 'Italika FT150'
   };
   let employee: string;
 
@@ -312,10 +307,10 @@ describe('FR-003 + FR-007 integration', () => {
     const employee = await loginAs('employee@company.com');
     const advisor = await loginAs('advisor@company.com');
     const created = await request(app).post('/api/v1/tickets').set(bearer(employee)).send({
-      title: 'Ticket Integración', 
-      description: 'Test de integración.', 
+      title: 'Ticket Integración',
+      description: 'Test de integración.',
       categoryId: 2,
-      storeLocation: 'Sucursal Centro', 
+      storeLocation: 'Sucursal Centro',
       motorcycleModel: 'Italika FT150',
     });
     expect(created.status).toBe(201);
@@ -324,18 +319,18 @@ describe('FR-003 + FR-007 integration', () => {
       technicianId: 2, expectedVersion: created.body.data.version,
     });
     expect(assigned.status).toBe(200);
-    
-    expect(assigned.body.data).toMatchObject({ 
-      storeLocation: 'Sucursal Centro', 
-      motorcycleModel: 'Italika FT150', 
-      version: 2 
+
+    expect(assigned.body.data).toMatchObject({
+      storeLocation: 'Sucursal Centro',
+      motorcycleModel: 'Italika FT150',
+      version: 2
     });
-    
+
     const stale = await request(app).patch(endpoint).set(bearer(advisor)).send({
       title: 'Cambio obsoleto', version: created.body.data.version,
     });
     expect(stale.status).toBe(409);
-    
+
     const edited = await request(app).patch(endpoint).set(bearer(advisor)).send({
       title: 'Cambio vigente', version: assigned.body.data.version,
     });

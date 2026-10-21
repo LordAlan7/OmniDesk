@@ -18,6 +18,16 @@ const router = createRouter({
 
   routes: [
     {
+      path: '/my-tickets', name: 'my-tickets',
+      component: () => import('@/views/MyTicketsView.vue'),
+      meta: { permissions: ['tickets:read'] },
+    },
+    {
+      path: '/my-tickets/:id', name: 'my-ticket-detail',
+      component: () => import('@/views/MyTicketsView.vue'),
+      meta: { permissions: ['tickets:read'] },
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('@/views/LoginView.vue'),
