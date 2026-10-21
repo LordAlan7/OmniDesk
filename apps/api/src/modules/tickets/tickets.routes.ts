@@ -5,7 +5,21 @@ import { categoryUpdateSchema, createTicketSchema, listTicketsSchema, updateTick
 import * as service from './tickets.service';
 import { businessInfoUpdateSchema } from './tickets.schemas';
 
+import { trackingQuery, listOwnTickets, ownTicket, trackingTicket, canReadInternalHistory } from './tickets.tracking';
+
 export const ticketsRouter = Router();
+
+ticketsRouter.get('/me/tickets', authenticate, async (req, res, next) => {
+  try {
+    const { page, limit, ...filters } = trackingQuery.parse(req.query);
+    paginated(res, await listOwnTickets(currentUser(req), filters), page, limit);
+  } catch (err) { next(err); }
+});
+
+ticketsRouter.get('/me/tickets/:id', authenticate, async (req, res, next) => {
+  try { ok(res, await ownTicket(parseId(req.params.id), currentUser(req))); }
+  catch (err) { next(err); }
+});
 
 // Endpoint para obtener categorías para el formulario
 ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) => {
@@ -29,7 +43,11 @@ ticketsRouter.post('/tickets', authenticate, async (req, res, next) => {
 ticketsRouter.get('/tickets', authenticate, async (req, res, next) => {
   try {
     const { page, limit, ...filters } = listTicketsSchema.parse(req.query);
-    paginated(res, await service.listTickets(currentUser(req), filters), page, limit);
+    const user = currentUser(req);
+    const tickets = await service.listTickets(user, filters);
+    const visible = await Promise.all(tickets.map(ticket =>
+      canReadInternalHistory(ticket, user) ? ticket : trackingTicket(ticket)));
+    paginated(res, visible, page, limit);
   } catch (err) {
     next(err);
   }
@@ -37,7 +55,9 @@ ticketsRouter.get('/tickets', authenticate, async (req, res, next) => {
 
 ticketsRouter.get('/tickets/:id', authenticate, async (req, res, next) => {
   try {
-    ok(res, await service.getTicketForUser(parseId(req.params.id), currentUser(req)));
+    const user = currentUser(req);
+    const ticket = await service.getTicketForUser(parseId(req.params.id), user);
+    ok(res, canReadInternalHistory(ticket, user) ? ticket : await trackingTicket(ticket));
   } catch (err) {
     next(err);
   }

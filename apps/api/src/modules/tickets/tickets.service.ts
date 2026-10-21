@@ -1,3 +1,4 @@
+import { publicUpdates, canReadInternalHistory } from './tickets.tracking';
 import { canReclassify } from './tickets.lifecycle';
 import { Errors } from '../../shared/errors';
 
@@ -719,11 +720,11 @@ export async function ticketHistory(
 
   user: AuthUser,
 
-): Promise<TicketHistoryEntry[]> {
+) {
 
-  await getTicketForUser(id, user);
-
-  return ticketsRepository.historyOf(id);
+  const ticket = await getTicketForUser(id, user);
+  const entries = await ticketsRepository.historyOf(id);
+  return canReadInternalHistory(ticket, user) ? entries : publicUpdates(entries);
 
 }
 

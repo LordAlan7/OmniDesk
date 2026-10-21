@@ -299,6 +299,10 @@ async function loadTicket() {
 
     if (sequence !== loadSequence) return
 
+    if (!('version' in result)) {
+      await router.replace(`/my-tickets/${id}`)
+      return
+    }
     ticket.value = result
     await loadHistory(id, sequence)
   } catch (cause) {

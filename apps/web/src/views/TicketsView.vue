@@ -164,8 +164,9 @@ onMounted(() => {
                 <td>{{ statusLabel(ticket.status) }}</td>
                <td>
   {{
-    ticket.assignedTechnicianName
-      || technicianLabel(ticket.assignedTechnicianId)
+    'assignedTechnicianId' in ticket
+      ? (ticket.assignedTechnicianName || technicianLabel(ticket.assignedTechnicianId))
+      : 'No compartido'
   }}
 </td>
                 <td>
