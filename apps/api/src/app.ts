@@ -6,6 +6,8 @@ import {
   errorHandler,
   notFoundHandler,
 } from './shared/middleware/errorHandler';
+import { enforceHttps } from './shared/middleware/https';
+import { apiRateLimiter } from './shared/middleware/rateLimit';
 import { requestId } from './shared/middleware/requestId';
 import {
   configureAccountResolver,
@@ -38,10 +40,17 @@ export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
-  app.use(helmet());
+  app.set('trust proxy', env.trustProxy);
+  app.use(enforceHttps);
+  app.use(
+    helmet({
+      hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
+    }),
+  );
   app.use(cors({ origin: env.corsOrigin }));
   app.use(express.json({ limit: '1mb' }));
   app.use(requestId);
+  app.use('/api/v1', apiRateLimiter);
 
   const api = express.Router();
 

@@ -122,3 +122,7 @@ modulo/
 
 Pasos: (1) schema, (2) repository, (3) service con sus reglas, (4) rutas, (5) pruebas,
 (6) exporta solo lo necesario en `index.ts`, (7) abre el PR.
+
+## Seguridad
+
+Parámetros, políticas y procedimientos de seguridad (NFR-002) en [docs/SECURITY.md](docs/SECURITY.md).

@@ -4,6 +4,7 @@ import {
   authenticate,
   currentUser,
 } from '../../shared/security/guards';
+import { loginRateLimiter } from '../../shared/middleware/rateLimit';
 import { loginSchema } from './auth.schemas';
 import { getProfile, login, logout } from './auth.service';
 
@@ -11,6 +12,7 @@ export const authRouter = Router();
 
 authRouter.post(
   '/auth/login',
+  loginRateLimiter,
   async (req, res, next) => {
     try {
       const { email, password } = loginSchema.parse(req.body);

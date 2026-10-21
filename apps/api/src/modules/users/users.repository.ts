@@ -30,7 +30,7 @@ if (env.seedDemoData) {
     ['Demo Administrator', 'admin@company.com', 'Administrator'],
   ];
   // Contraseña de DEMO solo para desarrollo/pruebas: ChangeMe123!
-  const hash = bcrypt.hashSync('ChangeMe123!', 8);
+  const hash = bcrypt.hashSync('ChangeMe123!', env.bcryptCost);
   for (const [name, email, role] of demo) {
     usersRepository.add({ name, email, passwordHash: hash, roles: [role], active: true });
   }

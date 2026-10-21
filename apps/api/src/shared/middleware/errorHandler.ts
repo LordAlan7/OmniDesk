@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { AppError } from '../errors';
+import { safeErrorLog } from '../security/redact';
 
 export const notFoundHandler: RequestHandler = (req, res) => {
   res.status(404).json({
@@ -41,8 +42,8 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
 
-  // Error inesperado: se registra completo, pero NO se expone al cliente.
-  console.error(`[${requestId}]`, err);
+  // Error inesperado: se registra completo, pero NO se expone al cliente. El log excluye parámetros/credenciales (NFR-002).
+  console.error(`[${requestId}]`, safeErrorLog(err));
   res.status(500).json({
     error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred.', requestId },
   });

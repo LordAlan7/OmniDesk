@@ -1,3 +1,4 @@
+import { redactSensitive } from '../../shared/security/redact';
 import { auditRepository } from './audit.repository';
 import { AuditInput, AuditRecord } from './audit.types';
 
@@ -5,8 +6,9 @@ export function recordAudit(input: Partial<AuditInput> & Pick<AuditInput, 'actio
   return auditRepository.add({
     entityId: null,
     actorId: null,
-    metadata: {},
     ...input,
+    // NFR-002: nunca persistir credenciales/tokens en la bitácora.
+    metadata: redactSensitive(input.metadata ?? {}),
   });
 }
 

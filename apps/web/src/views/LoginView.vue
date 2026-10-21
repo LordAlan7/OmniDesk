@@ -41,6 +41,8 @@ async function onSubmit() {
       errorMessage.value = 'No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.'
     } else if (e instanceof ApiError && e.kind === 'server') {
       errorMessage.value = 'El servidor tuvo un problema. Inténtalo de nuevo más tarde.'
+    } else if (e instanceof ApiError && e.status === 429) {
+      errorMessage.value = 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.'
     } else if (e instanceof ApiError && e.status === 400) {
       errorMessage.value = 'Revisa los datos ingresados.'
     } else {
