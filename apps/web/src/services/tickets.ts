@@ -1,4 +1,4 @@
-import { apiRequest } from './api'
+import { ApiError, apiRequest } from './api'
 
 export type TicketStatus =
   | 'Open'
@@ -135,4 +135,87 @@ export async function createTicket(payload: CreateTicketPayload) {
     },
     body: JSON.stringify(payload),
   })
+}
+
+export interface Priority {
+  id: number
+  name: string
+  description: string
+  sortOrder: number
+}
+
+export interface PriorityInput {
+  priorityId: number
+  expectedVersion: number
+  reason?: string
+}
+
+export async function getPriorities(): Promise<Priority[]> {
+  const response = await apiRequest<Priority[]>('/ticket-priorities')
+  return response.data
+}
+
+export async function updatePriority(
+  ticketId: number,
+  input: PriorityInput,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${ticketId}/priority`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  )
+  return response.data
+}
+
+export interface TicketAttachment {
+  id: number
+  ticketId: number
+  uploadedBy: number
+  uploadedByName: string
+  originalName: string
+  mimeType: string
+  sizeBytes: number
+  createdAt: string
+}
+
+export async function getAttachments(ticketId: number): Promise<TicketAttachment[]> {
+  const response = await apiRequest<TicketAttachment[]>(`/tickets/${ticketId}/attachments`)
+  return response.data
+}
+
+export async function uploadAttachment(ticketId: number, file: File): Promise<TicketAttachment> {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
+  const token = sessionStorage.getItem('omnidesk.token')
+  
+  const res = await fetch(`${base}/tickets/${ticketId}/attachments`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  })
+  
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}))
+    throw new ApiError(error.error?.message || 'Error al subir archivo', res.status)
+  }
+  
+  return (await res.json()).data
+}
+
+export async function getAttachmentUrl(ticketId: number, attachmentId: number): Promise<string> {
+  const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
+  const token = sessionStorage.getItem('omnidesk.token')
+  
+  const res = await fetch(`${base}/tickets/${ticketId}/attachments/${attachmentId}/content`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  
+  if (!res.ok) throw new ApiError('Error al descargar', res.status)
+  
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
 }

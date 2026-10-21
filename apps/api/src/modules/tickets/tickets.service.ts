@@ -32,6 +32,10 @@ export async function listCategories() {
   return ticketsRepository.listCategories();
 }
 
+export async function listPriorities() {
+  return ticketsRepository.listPriorities();
+}
+
 type HistoryInput = Omit<
   TicketHistoryEntry,
   'id' | 'createdAt' | 'ticketId'
@@ -235,12 +239,32 @@ export async function setPriority(
   id: number,
   priorityId: number,
   user: AuthUser,
+  options: {
+    expectedVersion: number;
+    reason?: string;
+  },
 ): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_PRIORITY_UPDATE)) {
     throw Errors.forbidden('Only managers can set the priority.');
   }
 
   const ticket = await getTicketForUser(id, user);
+
+  // No permitir cambiar prioridad de tickets cerrados
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se puede cambiar la prioridad de un ticket cerrado.');
+  }
+
+  // Control de concurrencia: verificar versión
+  if (ticket.version !== options.expectedVersion) {
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
+  }
+
+  // No generar evento falso si la prioridad es la misma
+  if (ticket.priorityId === priorityId) {
+    return ticket;
+  }
+
   const from = ticket.priorityId;
   ticket.priorityId = priorityId;
 
@@ -249,6 +273,7 @@ export async function setPriority(
     action: 'priority_changed',
     from,
     to: priorityId,
+    reason: options.reason ?? null,
   }]);
 
   recordAudit({
@@ -256,7 +281,7 @@ export async function setPriority(
     entity: 'ticket',
     entityId: id,
     actorId: user.id,
-    metadata: { from, to: priorityId },
+    metadata: { from, to: priorityId, reason: options.reason ?? null },
   });
 
   return saved;

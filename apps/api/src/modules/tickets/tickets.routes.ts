@@ -25,6 +25,14 @@ ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) =
   }
 });
 
+ticketsRouter.get('/ticket-priorities', authenticate, async (_req, res, next) => {
+  try {
+    ok(res, await service.listPriorities());
+  } catch (err) {
+    next(err);
+  }
+});
+
 ticketsRouter.post('/tickets', authenticate, async (req, res, next) => {
   try {
     const body = createTicketSchema.parse(req.body);
@@ -63,8 +71,13 @@ ticketsRouter.patch('/tickets/:id', authenticate, async (req, res, next) => {
 
 ticketsRouter.patch('/tickets/:id/priority', authenticate, async (req, res, next) => {
   try {
-    const { priorityId } = prioritySchema.parse(req.body);
-    ok(res, await service.setPriority(parseId(req.params.id), priorityId, currentUser(req)));
+    const { priorityId, expectedVersion, reason } = prioritySchema.parse(req.body);
+    ok(res, await service.setPriority(
+      parseId(req.params.id),
+      priorityId,
+      currentUser(req),
+      { expectedVersion, reason },
+    ));
   } catch (err) {
     next(err);
   }

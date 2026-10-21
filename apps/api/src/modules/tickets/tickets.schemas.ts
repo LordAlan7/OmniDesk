@@ -33,7 +33,17 @@ export const listTicketsSchema = paginationSchema.extend({
 
 export const prioritySchema = z
   .object({
-    priorityId: z.number().int().refine((n) => priorityIds.includes(n), { message: MESSAGES.invalidEnum('priorityId', priorityIds.map(String)) }),
+    priorityId: z
+      .number()
+      .int()
+      .refine((n: number) => priorityIds.includes(n), {
+        message: MESSAGES.invalidEnum('priorityId', priorityIds.map(String)),
+      }),
+    expectedVersion: z
+      .number()
+      .int()
+      .positive(MESSAGES.positiveInt('expectedVersion')),
+    reason: z.string().trim().max(500).optional(),
   })
   .strict();
 

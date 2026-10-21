@@ -30,6 +30,15 @@ const ticketsMemoryRepository = {
     ];
   },
 
+    async listPriorities() {
+    return [
+      { id: 1, name: 'Low', description: 'Baja - Problema con impacto mínimo, sin urgencia', sortOrder: 1 },
+      { id: 2, name: 'Medium', description: 'Media - Problema con impacto moderado, atención normal', sortOrder: 2 },
+      { id: 3, name: 'High', description: 'Alta - Problema importante que afecta operaciones', sortOrder: 3 },
+      { id: 4, name: 'Critical', description: 'Crítica - Problema urgente que bloquea operaciones', sortOrder: 4 },
+    ];
+  },
+
   async create(
     data: Pick<Ticket, 'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'>,
   ): Promise<Ticket> {

@@ -70,6 +70,17 @@ export const postgresTicketsRepository = {
     const result = await getPool().query<{ id: number; name: string }>('SELECT id, name FROM ticket_categories ORDER BY id');
     return result.rows;
   },
+  async listPriorities(): Promise<{ id: number; name: string; description: string; sortOrder: number }[]> {
+    const result = await getPool().query<{ id: number; name: string; description: string; sort_order: number }>(
+      'SELECT id, name, description, sort_order FROM ticket_priorities ORDER BY sort_order ASC',
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description ?? '',
+      sortOrder: row.sort_order,
+    }));
+  },
   async create(
     data: Pick<
       Ticket,

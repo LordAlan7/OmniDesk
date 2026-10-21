@@ -127,17 +127,19 @@ describe('tickets - full workflow', () => {
   });
 
   it('only a manager can set priority', async () => {
+    const ticketRes = await request(app).get(`/api/v1/tickets/${ticketId}`).set(bearer(manager));
+    
     const denied = await request(app)
       .patch(`/api/v1/tickets/${ticketId}/priority`)
       .set(bearer(advisor))
-      .send({ priorityId: 3 });
+      .send({ priorityId: 3, expectedVersion: ticketRes.body.data.version });
 
     expect(denied.status).toBe(403);
 
     const okRes = await request(app)
       .patch(`/api/v1/tickets/${ticketId}/priority`)
       .set(bearer(manager))
-      .send({ priorityId: 3 });
+      .send({ priorityId: 3, expectedVersion: ticketRes.body.data.version });
 
     expect(okRes.status).toBe(200);
     expect(okRes.body.data.priorityId).toBe(3);
@@ -339,5 +341,236 @@ describe('FR-003 + FR-007 integration', () => {
     });
     expect(edited.status).toBe(200);
     expect(edited.body.data).toMatchObject({ version: 3, storeLocation: 'Sucursal Centro', assignedTechnicianId: 2 });
+  });
+});
+
+describe('FR-006 - Gestión de prioridad', () => {
+  let employee: string;
+  let manager: string;
+  let advisor: string;
+  let ticketId: number;
+
+  beforeAll(async () => {
+    employee = await loginAs('employee@company.com');
+    manager = await loginAs('manager@company.com');
+    advisor = await loginAs('advisor@company.com');
+
+    const res = await request(app)
+      .post('/api/v1/tickets')
+      .set(bearer(employee))
+      .send({
+        title: 'Ticket para FR-006',
+        description: 'Prueba de prioridad.',
+        categoryId: 2,
+        storeLocation: 'Centro',
+        motorcycleModel: 'FT150',
+      });
+
+    ticketId = res.body.data.id;
+  });
+
+  it('GET /ticket-priorities - returns enriched catalog', async () => {
+    const res = await request(app).get('/api/v1/ticket-priorities').set(bearer(employee));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(4);
+    expect(res.body.data[0]).toHaveProperty('description');
+    expect(res.body.data[0]).toHaveProperty('sortOrder');
+  });
+
+  it('manager sets priority with reason', async () => {
+    const ticketRes = await request(app).get(`/api/v1/tickets/${ticketId}`).set(bearer(manager));
+    const version = ticketRes.body.data.version;
+
+    const res = await request(app)
+      .patch(`/api/v1/tickets/${ticketId}/priority`)
+      .set(bearer(manager))
+      .send({ priorityId: 3, expectedVersion: version, reason: 'Cliente VIP' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.priorityId).toBe(3);
+
+    const hist = await request(app).get(`/api/v1/tickets/${ticketId}/history`).set(bearer(manager));
+    const priorityEvent = hist.body.data.find((e: any) => e.action === 'priority_changed');
+    expect(priorityEvent).toBeDefined();
+    expect(priorityEvent.reason).toBe('Cliente VIP');
+  });
+
+  it('setting the same priority does not generate a new event', async () => {
+    const ticketRes = await request(app).get(`/api/v1/tickets/${ticketId}`).set(bearer(manager));
+    const version = ticketRes.body.data.version;
+    const histBefore = await request(app).get(`/api/v1/tickets/${ticketId}/history`).set(bearer(manager));
+
+    const res = await request(app)
+      .patch(`/api/v1/tickets/${ticketId}/priority`)
+      .set(bearer(manager))
+      .send({ priorityId: 3, expectedVersion: version });
+
+    expect(res.status).toBe(200);
+
+    const histAfter = await request(app).get(`/api/v1/tickets/${ticketId}/history`).set(bearer(manager));
+    expect(histAfter.body.data.length).toBe(histBefore.body.data.length);
+  });
+
+  it('rejects stale version with 409', async () => {
+    const res = await request(app)
+      .patch(`/api/v1/tickets/${ticketId}/priority`)
+      .set(bearer(manager))
+      .send({ priorityId: 1, expectedVersion: 999 });
+
+    expect(res.status).toBe(409);
+  });
+
+  it('advisor cannot change priority (403)', async () => {
+    const ticketRes = await request(app).get(`/api/v1/tickets/${ticketId}`).set(bearer(advisor));
+    const res = await request(app)
+      .patch(`/api/v1/tickets/${ticketId}/priority`)
+      .set(bearer(advisor))
+      .send({ priorityId: 1, expectedVersion: ticketRes.body.data.version });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('FR-004 - Evidencia y adjuntos', () => {
+  let employee: string;
+  let manager: string;
+  let other: string; // admin sin acceso al ticket
+  let ticketId: number;
+
+  beforeAll(async () => {
+    employee = await loginAs('employee@company.com');
+    manager = await loginAs('manager@company.com');
+    other = await loginAs('admin@company.com');
+
+    const res = await request(app)
+      .post('/api/v1/tickets')
+      .set(bearer(employee))
+      .send({
+        title: 'Ticket para FR-004',
+        description: 'Prueba de adjuntos.',
+        categoryId: 2,
+        storeLocation: 'Centro',
+        motorcycleModel: 'FT150',
+      });
+
+    ticketId = res.body.data.id;
+  });
+
+  it('uploads a valid image attachment', async () => {
+    // PNG válido (1x1 pixel transparente)
+    const pngBuffer = Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+      0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+      0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00,
+      0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+      0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82
+    ]);
+
+    const res = await request(app)
+      .post(`/api/v1/tickets/${ticketId}/attachments`)
+      .set(bearer(employee))
+      .attach('file', pngBuffer, { filename: 'evidencia.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.originalName).toBe('evidencia.png');
+    expect(res.body.data.mimeType).toBe('image/png');
+    expect(res.body.data.sizeBytes).toBe(pngBuffer.length);
+  });
+
+  it('lists attachments for the ticket', async () => {
+    const res = await request(app)
+      .get(`/api/v1/tickets/${ticketId}/attachments`)
+      .set(bearer(employee));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(1);
+    expect(res.body.data[0].originalName).toBe('evidencia.png');
+  });
+
+  it('downloads the attachment content', async () => {
+    const listRes = await request(app)
+      .get(`/api/v1/tickets/${ticketId}/attachments`)
+      .set(bearer(employee));
+    
+    const attId = listRes.body.data[0].id;
+
+    const res = await request(app)
+      .get(`/api/v1/tickets/${ticketId}/attachments/${attId}/content`)
+      .set(bearer(employee));
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('image/png');
+    expect(res.body.length).toBeGreaterThan(0);
+  });
+
+  it('rejects file with wrong extension vs content', async () => {
+    // Un archivo que dice ser PDF pero es texto
+    const fakePdf = Buffer.from('Esto no es un PDF, es texto plano.');
+
+    const res = await request(app)
+      .post(`/api/v1/tickets/${ticketId}/attachments`)
+      .set(bearer(employee))
+      .attach('file', fakePdf, { filename: 'fake.pdf', contentType: 'application/pdf' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects unsupported format (exe)', async () => {
+    const exeBuffer = Buffer.from([0x4D, 0x5A, 0x90, 0x00]); // CAB MZ
+
+    const res = await request(app)
+      .post(`/api/v1/tickets/${ticketId}/attachments`)
+      .set(bearer(employee))
+      .attach('file', exeBuffer, { filename: 'virus.exe', contentType: 'application/x-msdownload' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects access from unauthorized user (404)', async () => {
+    // admin no tiene acceso al ticket porque no lo creó y no tiene TICKETS_READ_ALL
+    const res = await request(app)
+      .get(`/api/v1/tickets/${ticketId}/attachments`)
+      .set(bearer(other));
+
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects attachment from unrelated ticket+attachment IDs', async () => {
+    const listRes = await request(app)
+      .get(`/api/v1/tickets/${ticketId}/attachments`)
+      .set(bearer(employee));
+    
+    const attId = listRes.body.data[0].id;
+
+    // Crear otro ticket
+    const newTicket = await request(app)
+      .post('/api/v1/tickets')
+      .set(bearer(employee))
+      .send({
+        title: 'Otro ticket',
+        description: 'Otro ticket.',
+        categoryId: 2,
+        storeLocation: 'Sur',
+        motorcycleModel: 'DM150',
+      });
+
+    // Intentar descargar el adjunto del primer ticket usando el ID del segundo
+    const res = await request(app)
+      .get(`/api/v1/tickets/${newTicket.body.data.id}/attachments/${attId}/content`)
+      .set(bearer(employee));
+
+    expect(res.status).toBe(404);
+  });
+
+  it('records upload in audit log', async () => {
+    const res = await request(app)
+      .get('/api/v1/audit-logs?entity=ticket&action=ticket.attachment_uploaded')
+      .set(bearer(manager));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
   });
 });

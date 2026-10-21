@@ -51,3 +51,10 @@ export interface TicketHistoryEntry {
   reason?: string | null;
   createdAt: string;
 }
+
+export interface Priority {
+  id: number;
+  name: string;
+  description: string;
+  sortOrder: number;
+}
