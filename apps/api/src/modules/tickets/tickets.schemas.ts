@@ -27,7 +27,7 @@ export const createTicketSchema = z
       .number()
       .int()
       .positive(MESSAGES.positiveInt('categoryId')),
-      
+
     // NUEVOS CAMPOS FR-010:
     storeLocation: z
       .string()
@@ -79,7 +79,7 @@ export const updateTicketSchema = z
       .positive(MESSAGES.positiveInt('version')),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 1, { 
+  .refine((v) => Object.keys(v).length > 1, {
     message: MESSAGES.noFieldsToUpdate,
   });
 
@@ -104,7 +104,7 @@ export const businessInfoUpdateSchema = z
       .positive(MESSAGES.positiveInt('version')),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 1, { 
+  .refine((v) => Object.keys(v).length > 1, {
     message: MESSAGES.noFieldsToUpdate,
   });
 
@@ -116,67 +116,34 @@ export const listTicketsSchema = paginationSchema.extend({
 
 export const prioritySchema = z
   .object({
-    priorityId: z
-      .number()
-      .int()
-      .refine((n) => priorityIds.includes(n), {
-        message: MESSAGES.invalidEnum(
-          'priorityId',
-          priorityIds.map(String),
-        ),
-      }),
+    priorityId: z.number().int().refine((n) => priorityIds.includes(n), { message: MESSAGES.invalidEnum('priorityId', priorityIds.map(String)) }),
   })
   .strict();
 
 export const assignmentSchema = z
   .object({
-    expectedVersion: z.number().int().positive(),
-    reason: z.string().trim().min(1).max(1000).optional(),
-    technicianId: z
-      .number()
-      .int()
-      .positive(MESSAGES.positiveInt('technicianId')),
-    dueDate: z
-      .string()
-      .datetime(MESSAGES.invalidDate('dueDate'))
-      .optional(),
+    technicianId: z.number().int().positive(MESSAGES.positiveInt('technicianId')),
+    dueDate: z.string().datetime(MESSAGES.invalidDate('dueDate')).optional(),
+    expectedVersion: z.number().int().positive(MESSAGES.positiveInt('expectedVersion')),
+    reason: z.string().trim().max(500).optional(),
   })
   .strict();
 
 export const statusSchema = z
   .object({
-    status: z.enum(TICKET_STATUSES, {
-      message: MESSAGES.invalidEnum('status', TICKET_STATUSES),
-    }),
+    status: z.enum(TICKET_STATUSES, { message: MESSAGES.invalidEnum('status', TICKET_STATUSES) }),
   })
   .strict();
 
 export const resolutionSchema = z
   .object({
-    resolution: z
-      .string()
-      .trim()
-      .min(
-        STRING_LIMITS.ticketResolution.min,
-        MESSAGES.tooShort('La resolución', STRING_LIMITS.ticketResolution.min),
-      )
-      .max(
-        STRING_LIMITS.ticketResolution.max,
-        MESSAGES.tooLong('La resolución', STRING_LIMITS.ticketResolution.max),
-      ),
+    resolution: z.string().trim().min(STRING_LIMITS.ticketResolution.min).max(STRING_LIMITS.ticketResolution.max),
   })
   .strict();
 
 export const closeSchema = z
   .object({
-    comment: z
-      .string()
-      .trim()
-      .max(
-        STRING_LIMITS.ticketCloseComment.max,
-        MESSAGES.tooLong('El comentario', STRING_LIMITS.ticketCloseComment.max),
-      )
-      .optional(),
+    comment: z.string().trim().max(STRING_LIMITS.ticketCloseComment.max).optional(),
   })
   .strict();
 

@@ -228,9 +228,9 @@ function publishStatus(
 }
 
 export async function createTicket(
-  data: { 
-    title: string; 
-    description: string; 
+  data: {
+    title: string;
+    description: string;
     categoryId: number;
     storeLocation: string;      // NUEVO
     motorcycleModel: string;    // NUEVO
@@ -318,76 +318,6 @@ export async function listTickets(
       .map(withTechnicianName),
 
   );
-
-}
-
-export async function updateTicket(
-
-  id: number,
-
-  patch: {
-
-    title?: string;
-
-    description?: string;
-
-    categoryId?: number;
-
-    version: number;
-
-  },
-
-  user: AuthUser,
-
-): Promise<Ticket> {
-
-  const ticket = await getTicketForUser(id, user);
-
-  const ownerEditing =
-
-    ticket.createdBy === user.id && ticket.status === 'Open';
-
-  const staffEditing =
-
-    can(user, PERMISSIONS.TICKETS_UPDATE) &&
-
-    can(user, PERMISSIONS.TICKETS_READ_ALL);
-
-  if (!ownerEditing && !staffEditing) {
-
-    throw Errors.forbidden();
-
-  }
-
-  if (ticket.version !== patch.version) throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
-
-  const { version: _version, ...changes } = patch;
-
-  Object.assign(ticket, changes);
-
-  const saved = await saveWithHistory(ticket, [{
-
-    actorId: user.id,
-
-    action: 'updated',
-
-    to: patch,
-
-  }]);
-
-  recordAudit({
-
-    action: 'ticket.updated',
-
-    entity: 'ticket',
-
-    entityId: id,
-
-    actorId: user.id,
-
-  });
-
-  return saved;
 
 }
 
@@ -899,14 +829,13 @@ export async function updateCategory(
 
 }
 
-
 export async function updateBusinessInfo(
   id: number,
   patch: { storeLocation?: string; motorcycleModel?: string; version: number },
   user: AuthUser,
 ): Promise<Ticket> {
   const ticket = await getTicketForUser(id, user);
-  
+
   // Solo Advisor y Manager pueden editar
   const canEdit = user.roles.some(role => role === 'Service Advisor' || role === 'Manager');
   if (!canEdit) throw Errors.forbidden();
@@ -945,6 +874,52 @@ export async function updateBusinessInfo(
     entityId: id,
     actorId: user.id,
     metadata: { from, to: patch },
+  });
+
+  return saved;
+}
+
+export async function updateTicket(
+  id: number,
+  patch: {
+    title?: string;
+    description?: string;
+    categoryId?: number;
+    version: number;
+  },
+  user: AuthUser,
+): Promise<Ticket> {
+  const ticket = await getTicketForUser(id, user);
+
+  const ownerEditing =
+    ticket.createdBy === user.id && ticket.status === 'Open';
+
+  const staffEditing =
+    can(user, PERMISSIONS.TICKETS_UPDATE) &&
+    can(user, PERMISSIONS.TICKETS_READ_ALL);
+
+  if (!ownerEditing && !staffEditing) {
+    throw Errors.forbidden();
+  }
+
+  if (ticket.version !== patch.version) {
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
+  }
+
+  const { version: _version, ...changes } = patch;
+  Object.assign(ticket, changes);
+
+  const saved = await saveWithHistory(ticket, [{
+    actorId: user.id,
+    action: 'updated',
+    to: patch,
+  }]);
+
+  recordAudit({
+    action: 'ticket.updated',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
   });
 
   return saved;
