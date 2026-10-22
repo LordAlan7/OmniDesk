@@ -16,6 +16,7 @@ import {
 const router = useRouter()
 const tickets = ref<Ticket[]>([])
 const status = ref<TicketStatus | ''>('')
+const overdue = ref<'' | 'true' | 'false'>('')
 const page = ref(1)
 const limit = 10
 const total = ref(0)
@@ -36,6 +37,13 @@ const statuses: { value: TicketStatus; label: string }[] = [
 
 function statusLabel(value: TicketStatus): string {
   return statuses.find((item) => item.value === value)?.label ?? value
+}
+
+function formatDeadline(ticket: Ticket): string {
+  if (!('dueDate' in ticket)) return 'No compartido'
+  return ticket.dueDate
+    ? new Date(ticket.dueDate).toLocaleString('es-MX')
+    : 'Sin plazo definido'
 }
 
 function technicianLabel(id: number | null): string {
@@ -61,6 +69,7 @@ async function loadTickets() {
       page.value,
       limit,
       status.value || undefined,
+      overdue.value === '' ? undefined : overdue.value === 'true',
     )
 
     tickets.value = response.data
@@ -130,6 +139,18 @@ onMounted(() => {
           </option>
         </select>
 
+        <label for="ticket-overdue">Vencimiento</label>
+
+        <select
+          id="ticket-overdue"
+          v-model="overdue"
+          :disabled="loading"
+        >
+          <option value="">Todos</option>
+          <option value="true">Vencidos</option>
+          <option value="false">No vencidos</option>
+        </select>
+
         <button :disabled="loading">Consultar</button>
       </form>
 
@@ -151,6 +172,7 @@ onMounted(() => {
               <tr>
                 <th scope="col">Ticket</th>
                 <th scope="col">Estado</th>
+                <th scope="col">Plazo</th>
                 <th scope="col">Técnico asignado</th>
                 <th scope="col">Detalle</th>
               </tr>
@@ -162,6 +184,14 @@ onMounted(() => {
                   {{ ticket.title }}
                 </td>
                 <td>{{ statusLabel(ticket.status) }}</td>
+                <td>
+                  {{ formatDeadline(ticket) }}
+                  <span
+                    v-if="ticket.isOverdue"
+                    class="overdue"
+                    data-testid="overdue-badge"
+                  >Vencido</span>
+                </td>
                <td>
   {{
     'assignedTechnicianId' in ticket
@@ -253,6 +283,7 @@ a { color: #2457d6; }
 table { width: 100%; border-collapse: collapse; text-align: left; }
 th, td { padding: 16px 12px; border-bottom: 1px solid #e4e9f1; }
 th { background: #f8f9ff; color: #5f6b7a; }
+.overdue { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #fff0f0; color: #a52121; font-size: 12px; font-weight: 700; }
 .error { padding: 16px; background: #fff0f0; color: #a52121; }
 button:focus-visible, select:focus-visible, a:focus-visible {
   outline: 2px solid #2457d6;

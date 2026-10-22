@@ -293,6 +293,38 @@ export const postgresTicketsRepository = {
     return result.rows.map(toTicket);
   },
 
+  /** Evento de historial sin modificar el ticket (p. ej. notas de avance, FR-008). */
+  async addHistory(
+    entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>,
+  ): Promise<TicketHistoryEntry> {
+    const result = await getPool().query<HistoryRow>(
+      `INSERT INTO ticket_history (
+         ticket_id, actor_id, action, from_value, to_value, reason
+       )
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+       RETURNING *`,
+      [
+        entry.ticketId,
+        entry.actorId,
+        entry.action,
+        JSON.stringify(entry.from ?? null),
+        JSON.stringify(entry.to ?? null),
+        entry.reason ?? null,
+      ],
+    );
+    const row = result.rows[0]!;
+    return {
+      id: row.id,
+      ticketId: row.ticket_id,
+      actorId: row.actor_id,
+      action: row.action,
+      from: row.from_value,
+      to: row.to_value,
+      reason: row.reason,
+      createdAt: row.created_at.toISOString(),
+    };
+  },
+
   async historyOf(
     ticketId: number,
   ): Promise<TicketHistoryEntry[]> {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
-import { categoryUpdateSchema, createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema } from './tickets.schemas';
+import { categoryUpdateSchema, createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema, deadlineSchema, progressUpdateSchema } from './tickets.schemas';
 import * as service from './tickets.service';
 import { businessInfoUpdateSchema } from './tickets.schemas';
 
@@ -114,8 +114,8 @@ ticketsRouter.patch('/tickets/:id/assignment', authenticate, async (req, res, ne
 
 ticketsRouter.patch('/tickets/:id/status', authenticate, async (req, res, next) => {
   try {
-    const { status } = statusSchema.parse(req.body);
-    ok(res, await service.changeStatus(parseId(req.params.id), status, currentUser(req)));
+    const { status, expectedVersion } = statusSchema.parse(req.body);
+    ok(res, await service.changeStatus(parseId(req.params.id), status, currentUser(req), expectedVersion));
   } catch (err) {
     next(err);
   }
@@ -168,6 +168,32 @@ ticketsRouter.patch('/tickets/:id/business-information', authenticate, async (re
   try {
     const body = businessInfoUpdateSchema.parse(req.body);
     ok(res, await service.updateBusinessInfo(parseId(req.params.id), body, currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.get('/tickets/:id/available-transitions', authenticate, async (req, res, next) => {
+  try {
+    ok(res, await service.ticketAvailableTransitions(parseId(req.params.id), currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.patch('/tickets/:id/deadline', authenticate, async (req, res, next) => {
+  try {
+    const { dueDate, expectedVersion, reason } = deadlineSchema.parse(req.body);
+    ok(res, await service.setDeadline(parseId(req.params.id), dueDate, currentUser(req), { expectedVersion, reason }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.post('/tickets/:id/progress-updates', authenticate, async (req, res, next) => {
+  try {
+    const { note } = progressUpdateSchema.parse(req.body);
+    ok(res, await service.addProgressUpdate(parseId(req.params.id), note, currentUser(req)), 201);
   } catch (err) {
     next(err);
   }

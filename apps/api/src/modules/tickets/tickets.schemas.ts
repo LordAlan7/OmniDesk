@@ -112,6 +112,7 @@ export const listTicketsSchema = paginationSchema.extend({
   status: z.enum(TICKET_STATUSES).optional(),
   priorityId: z.coerce.number().int().optional(),
   categoryId: z.coerce.number().int().optional(),
+  overdue: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
 });
 
 export const prioritySchema = z
@@ -142,6 +143,7 @@ export const assignmentSchema = z
 export const statusSchema = z
   .object({
     status: z.enum(TICKET_STATUSES, { message: MESSAGES.invalidEnum('status', TICKET_STATUSES) }),
+    expectedVersion: z.number().int().positive(MESSAGES.positiveInt('expectedVersion')).optional(),
   })
   .strict();
 
@@ -163,5 +165,20 @@ export const categoryUpdateSchema = z
       .number()
       .int()
       .positive(MESSAGES.positiveInt('categoryId')),
+  })
+  .strict();
+
+/** FR-008: el plazo se modifica con motivo obligatorio; null lo elimina. */
+export const deadlineSchema = z
+  .object({
+    dueDate: z.string().datetime(MESSAGES.invalidDate('dueDate')).nullable(),
+    expectedVersion: z.number().int().positive(MESSAGES.positiveInt('expectedVersion')),
+    reason: z.string().trim().min(1, MESSAGES.required('El motivo')).max(500),
+  })
+  .strict();
+
+export const progressUpdateSchema = z
+  .object({
+    note: z.string().trim().min(1, MESSAGES.required('La nota de avance')).max(1000),
   })
   .strict();

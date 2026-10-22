@@ -7,6 +7,7 @@ import {
   hasPermission,
   sessionUser,
 } from '../services/session'
+import TicketTrackingPanel from '../components/TicketTrackingPanel.vue'
 import {
   assignTechnician,
   getCategories,
@@ -248,6 +249,20 @@ function historyDescription(
       ? priorities.value.find(p => p.id === entry.to)?.name ?? `Prioridad #${entry.to}`
       : 'Sin prioridad'
     return `Prioridad: ${fromPriority} → ${toPriority}`
+  }
+
+  if (entry.action === 'deadline_changed') {
+    const previous = typeof entry.from === 'string'
+      ? formatDate(entry.from)
+      : 'Sin plazo'
+    const next = typeof entry.to === 'string'
+      ? formatDate(entry.to)
+      : 'Sin plazo'
+    return `Plazo: ${previous} → ${next}`
+  }
+
+  if (entry.action === 'progress_update') {
+    return `Avance: ${String(entry.to)}`
   }
 
   const labels: Record<string, string> = {
@@ -701,6 +716,13 @@ watch(
             <span class="badge">
               {{ statusLabel(ticket.status) }}
             </span>
+            <span
+              v-if="ticket.isOverdue"
+              class="badge overdue"
+              data-testid="overdue-badge"
+            >
+              Vencido
+            </span>
           </p>
         </header>
 
@@ -720,10 +742,15 @@ watch(
             {{
               ticket.dueDate
                 ? formatDate(ticket.dueDate)
-                : 'Sin definir'
+                : 'Sin plazo definido'
             }}
           </p>
         </section>
+
+        <TicketTrackingPanel
+          :ticket="ticket"
+          @changed="loadTicket"
+        />
 
         <section class="card" :aria-busy="saving || loadingInformation">
           <h2>Clasificación e información comercial</h2>
@@ -1177,6 +1204,12 @@ h2 {
   font-size: 20px;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.badge.overdue {
+  margin-left: 8px;
+  background: #fff0f0;
+  color: #a52121;
 }
 
 .badge {

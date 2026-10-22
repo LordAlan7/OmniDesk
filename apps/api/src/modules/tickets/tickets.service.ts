@@ -1,5 +1,6 @@
 import { publicUpdates, canReadInternalHistory } from './tickets.tracking';
 import { canReclassify } from './tickets.lifecycle';
+import { TRANSITIONS, availableTransitions, isOverdue } from './tickets.deadline';
 import { Errors } from '../../shared/errors';
 
 import { AuthUser } from '../../shared/types';
@@ -69,20 +70,6 @@ type HistoryInput = Omit<
 
 >;
 
-const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-
-  Open: ['Assigned'],
-
-  Assigned: ['In Progress'],
-
-  'In Progress': ['Resolved'],
-
-  Resolved: ['In Progress', 'Closed'],
-
-  Closed: [],
-
-};
-
 async function withTechnicianName(
 
   ticket: Ticket,
@@ -100,6 +87,7 @@ async function withTechnicianName(
     ...ticket,
 
     assignedTechnicianName: technician?.name ?? null,
+    isOverdue: isOverdue(ticket),
 
   };
 
@@ -305,11 +293,15 @@ export async function listTickets(
 
     categoryId?: number;
 
+    overdue?: boolean;
+
   },
 
 ): Promise<Ticket[]> {
 
-  const filter: TicketFilter = { ...q, visibleTo: null };
+  const { overdue, ...rest } = q;
+
+  const filter: TicketFilter = { ...rest, visibleTo: null };
 
   const tickets = await ticketsRepository.list(filter);
 
@@ -318,6 +310,8 @@ export async function listTickets(
     tickets
 
       .filter(ticketVisibilityFilter(user))
+
+      .filter((t) => overdue === undefined || isOverdue(t) === overdue)
 
       .map(withTechnicianName),
 
@@ -604,6 +598,8 @@ export async function changeStatus(
 
   user: AuthUser,
 
+  expectedVersion?: number,
+
 ): Promise<Ticket> {
 
   if (!can(user, PERMISSIONS.TICKETS_STATUS_UPDATE)) {
@@ -615,6 +611,12 @@ export async function changeStatus(
   const ticket = await getTicketForUser(id, user);
 
   mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  if (expectedVersion !== undefined && ticket.version !== expectedVersion) {
+
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de cambiar el estado.');
+
+  }
 
   if (
 
@@ -944,4 +946,92 @@ export async function updateTicket(
   });
 
   return saved;
+}
+
+
+/** FR-008: transiciones que el usuario puede ejecutar ahora sobre el ticket. */
+export async function ticketAvailableTransitions(
+  id: number,
+  user: AuthUser,
+) {
+  const ticket = await getTicketForUser(id, user);
+  return availableTransitions(ticket, user);
+}
+
+/** FR-008: establece, modifica o elimina el plazo. Motivo obligatorio; no registra cambios idénticos. */
+export async function setDeadline(
+  id: number,
+  dueDate: string | null,
+  user: AuthUser,
+  options: { expectedVersion: number; reason: string },
+): Promise<Ticket> {
+  if (!can(user, PERMISSIONS.TICKETS_DEADLINE_UPDATE)) {
+    throw Errors.forbidden();
+  }
+  const ticket = await getTicketForUser(id, user);
+  if (ticket.version !== options.expectedVersion) {
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de modificar el plazo.');
+  }
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se puede modificar el plazo de un ticket cerrado.');
+  }
+  if (dueDate !== null && new Date(dueDate).getTime() <= Date.now()) {
+    throw Errors.validation([
+      { field: 'dueDate', message: 'El plazo debe ser una fecha futura.' },
+    ]);
+  }
+  const current = ticket.dueDate;
+  const unchanged =
+    dueDate === null
+      ? current === null
+      : current !== null && new Date(current).getTime() === new Date(dueDate).getTime();
+  if (unchanged) return ticket;
+
+  ticket.dueDate = dueDate;
+  const saved = await saveWithHistory(ticket, [
+    {
+      actorId: user.id,
+      action: 'deadline_changed',
+      from: current,
+      to: dueDate,
+      reason: options.reason,
+    },
+  ]);
+  recordAudit({
+    action: 'ticket.deadline_changed',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+    metadata: { from: current, to: dueDate, reason: options.reason },
+  });
+  return saved;
+}
+
+/** FR-008: nota de avance interna con autor y fecha (solo visible en el historial interno). */
+export async function addProgressUpdate(
+  id: number,
+  note: string,
+  user: AuthUser,
+) {
+  if (!can(user, PERMISSIONS.TICKETS_PROGRESS_CREATE)) {
+    throw Errors.forbidden();
+  }
+  const ticket = await getTicketForUser(id, user);
+  mustBeAssignedTechnicianOrStaff(ticket, user);
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se pueden registrar avances en un ticket cerrado.');
+  }
+  const entry = await ticketsRepository.addHistory({
+    ticketId: id,
+    actorId: user.id,
+    action: 'progress_update',
+    to: note,
+  });
+  recordAudit({
+    action: 'ticket.progress_update',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+  });
+  return entry;
 }

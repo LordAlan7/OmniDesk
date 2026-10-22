@@ -30,6 +30,8 @@ export interface Ticket {
   createdBy: number;
   assignedTechnicianId: number | null;
   assignedTechnicianName?: string | null;
+  /** Calculado al consultar (FR-008); no se persiste. */
+  isOverdue?: boolean;
   dueDate: string | null;
   resolution: string | null;
   createdAt: string;
