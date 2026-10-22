@@ -29,6 +29,7 @@ import {
   findUserById,
   configurePendingTicketsChecker,
 } from './modules/users';
+import { ticketCategoriesRouter } from './modules/tickets/tickets.categories.routes';
 
 export function createApp() {
   configureAccountResolver(findUserById);
@@ -66,6 +67,7 @@ export function createApp() {
   api.use(authRouter);
   api.use(usersRouter);
   api.use(ticketsRouter);
+  api.use(ticketCategoriesRouter);
   api.use(filesRouter);
   api.use(knowledgeRouter);
   api.use(aiRouter);

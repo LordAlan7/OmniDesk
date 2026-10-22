@@ -1,237 +1,947 @@
+import { publicUpdates, canReadInternalHistory } from './tickets.tracking';
+import { canReclassify } from './tickets.lifecycle';
 import { Errors } from '../../shared/errors';
-import { AuthUser } from '../../shared/types';
-import {
-  PERMISSIONS,
-  can,
-  canAccessTicket,
-  ticketVisibilityFilter,
-} from '../../shared/authorization';
-import { recordAudit } from '../audit';
-import { notify } from '../notifications';
-import {
-  isActiveTechnician,
-  withTechnicianLifecycleLock,
-} from '../users';
-import { TicketFilter, ticketsRepository as repo } from './tickets.repository';
-import { Ticket, TicketStatus } from './tickets.types';
 
-/** Máquina de estados del ticket (provisional, ver tickets.types.ts). */
+import { AuthUser } from '../../shared/types';
+
+import {
+
+  PERMISSIONS,
+
+  can,
+
+  canAccessTicket,
+
+  ticketVisibilityFilter,
+
+} from '../../shared/authorization';
+
+import { recordAudit } from '../audit';
+
+import { notify } from '../notifications';
+
+import {
+
+  isActiveTechnician,
+
+  listActiveTechnicians,
+
+  withTechnicianLifecycleLock,
+
+  findUserById,
+
+} from '../users';
+
+import {
+
+  TicketFilter,
+
+  ticketsRepository,
+
+} from './tickets.repository';
+
+import {
+
+  Ticket,
+
+  TicketHistoryEntry,
+
+  TicketStatus,
+
+} from './tickets.types';
+
+const creations = new Map<string, { fingerprint: string; result: Promise<Ticket> }>();
+
+export async function listCategories() {
+
+  return ticketsRepository.listCategories();
+}
+
+export async function listPriorities() {
+  return ticketsRepository.listPriorities();
+}
+
+type HistoryInput = Omit<
+
+  TicketHistoryEntry,
+
+  'id' | 'createdAt' | 'ticketId'
+
+>;
+
 const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
+
   Open: ['Assigned'],
+
   Assigned: ['In Progress'],
+
   'In Progress': ['Resolved'],
+
   Resolved: ['In Progress', 'Closed'],
+
   Closed: [],
+
 };
 
-/** Obtiene un ticket verificando que el usuario tenga permiso de verlo (RBAC + propiedad).
- *  404 (no 403) para no revelar que existe un ticket ajeno. */
-export function getTicketForUser(id: number, user: AuthUser): Ticket {
-  const ticket = repo.findById(id);
-  if (!ticket || !canAccessTicket(ticket, user)) throw Errors.notFound('Ticket');
-  return ticket;
+async function withTechnicianName(
+
+  ticket: Ticket,
+
+): Promise<Ticket> {
+
+  const technician = ticket.assignedTechnicianId === null
+
+    ? undefined
+
+    : await findUserById(ticket.assignedTechnicianId);
+
+  return {
+
+    ...ticket,
+
+    assignedTechnicianName: technician?.name ?? null,
+
+  };
+
 }
 
-function mustBeAssignedTechnicianOrStaff(ticket: Ticket, user: AuthUser) {
-  const isAssignedTech = ticket.assignedTechnicianId === user.id;
-  const isStaff = can(user, PERMISSIONS.TICKETS_READ_ALL);
-  if (!isAssignedTech && !isStaff) throw Errors.forbidden();
-}
+export async function getTicketForUser(
 
-function moveTo(ticket: Ticket, to: TicketStatus, user: AuthUser): void {
-  if (!TRANSITIONS[ticket.status].includes(to)) {
-    throw Errors.invalidState(`A ticket cannot move from "${ticket.status}" to "${to}".`);
-  }
-  const from = ticket.status;
-  ticket.status = to;
-  repo.save(ticket);
-  repo.addHistory({ ticketId: ticket.id, actorId: user.id, action: 'status_changed', from, to });
-  recordAudit({
-    action: 'ticket.status_changed',
-    entity: 'ticket',
-    entityId: ticket.id,
-    actorId: user.id,
-    metadata: { from, to },
-  });
-  notify(ticket.createdBy, 'ticket.status_changed', `Your ticket #${ticket.id} is now "${to}".`, {
-    entity: 'ticket',
-    id: ticket.id,
-  });
-}
-
-export function createTicket(
-  data: { title: string; description: string; categoryId: number },
-  user: AuthUser,
-): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_CREATE)) throw Errors.forbidden();
-  const ticket = repo.create({ ...data, createdBy: user.id });
-  repo.addHistory({ ticketId: ticket.id, actorId: user.id, action: 'created', to: 'Open' });
-  recordAudit({ action: 'ticket.created', entity: 'ticket', entityId: ticket.id, actorId: user.id });
-  return ticket;
-}
-
-export function listTickets(
-  user: AuthUser,
-  q: { status?: TicketStatus; priorityId?: number; categoryId?: number },
-): Ticket[] {
-  // El repositorio ya no filtra por usuario: la visibilidad depende de más de
-  // un criterio (propiedad, asignación, rol con READ_ALL), así que se aplica
-  // el predicado de autorización aquí, antes de paginar.
-  const filter: TicketFilter = { ...q, visibleTo: null };
-  return repo.list(filter).filter(ticketVisibilityFilter(user));
-}
-
-export function updateTicket(
   id: number,
-  patch: { title?: string; description?: string; categoryId?: number },
+
   user: AuthUser,
-): Ticket {
-  const ticket = getTicketForUser(id, user);
-  const ownerEditing = ticket.createdBy === user.id && ticket.status === 'Open';
-  const staffEditing =
-    can(user, PERMISSIONS.TICKETS_UPDATE) && can(user, PERMISSIONS.TICKETS_READ_ALL);
-  if (!ownerEditing && !staffEditing) throw Errors.forbidden();
-  Object.assign(ticket, patch);
-  repo.save(ticket);
-  repo.addHistory({ ticketId: id, actorId: user.id, action: 'updated', to: patch });
-  recordAudit({ action: 'ticket.updated', entity: 'ticket', entityId: id, actorId: user.id });
-  return ticket;
+
+): Promise<Ticket> {
+
+  const ticket = await ticketsRepository.findById(id);
+
+  if (!ticket || !canAccessTicket(ticket, user)) {
+
+    throw Errors.notFound('Ticket');
+
+  }
+
+  // Evita modificar el registro en memoria antes de validar.
+
+  return withTechnicianName(ticket);
+
 }
 
-export function setPriority(id: number, priorityId: number, user: AuthUser): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_PRIORITY_UPDATE)) {
-    throw Errors.forbidden('Only managers can set the priority.');
+async function saveWithHistory(
+
+  ticket: Ticket,
+
+  entries: HistoryInput[],
+
+): Promise<Ticket> {
+
+  const saved = await ticketsRepository.saveWithHistory(ticket, ticket.version, entries);
+
+  return withTechnicianName(saved);
+
+}
+
+function mustBeAssignedTechnicianOrStaff(
+
+  ticket: Ticket,
+
+  user: AuthUser,
+
+): void {
+
+  const assigned = ticket.assignedTechnicianId === user.id;
+
+  const staff = can(user, PERMISSIONS.TICKETS_READ_ALL);
+
+  if (!assigned && !staff) throw Errors.forbidden();
+
+}
+
+function transition(
+
+  ticket: Ticket,
+
+  to: TicketStatus,
+
+  user: AuthUser,
+
+): HistoryInput {
+
+  if (!TRANSITIONS[ticket.status].includes(to)) {
+
+    throw Errors.invalidState(
+
+      `A ticket cannot move from "${ticket.status}" to "${to}".`,
+
+    );
+
   }
-  const ticket = getTicketForUser(id, user);
-  const from = ticket.priorityId;
-  ticket.priorityId = priorityId;
-  repo.save(ticket);
-  repo.addHistory({ ticketId: id, actorId: user.id, action: 'priority_changed', from, to: priorityId });
-  recordAudit({
-    action: 'ticket.priority_changed',
-    entity: 'ticket',
-    entityId: id,
+
+  const from = ticket.status;
+
+  ticket.status = to;
+
+  return {
+
     actorId: user.id,
-    metadata: { from, to: priorityId },
+
+    action: 'status_changed',
+
+    from,
+
+    to,
+
+  };
+
+}
+
+function publishStatus(
+
+  ticket: Ticket,
+
+  entry: HistoryInput,
+
+): void {
+
+  recordAudit({
+
+    action: 'ticket.status_changed',
+
+    entity: 'ticket',
+
+    entityId: ticket.id,
+
+    actorId: entry.actorId,
+
+    metadata: { from: entry.from, to: entry.to },
+
   });
-  return ticket;
+
+  notify(
+
+    ticket.createdBy,
+
+    'ticket.status_changed',
+
+    `Your ticket #${ticket.id} is now "${ticket.status}".`,
+
+    { entity: 'ticket', id: ticket.id },
+
+  );
+
+}
+
+export async function createTicket(
+  data: {
+    title: string;
+    description: string;
+    categoryId: number;
+    storeLocation: string;      // NUEVO
+    motorcycleModel: string;    // NUEVO
+  },
+  user: AuthUser,
+
+  idempotencyKey?: string,
+
+): Promise<Ticket> {
+
+  if (!can(user, PERMISSIONS.TICKETS_CREATE)) {
+
+    throw Errors.forbidden();
+
+  }
+
+  const key = idempotencyKey ? `${user.id}:${idempotencyKey}` : undefined;
+
+  const fingerprint = JSON.stringify(data);
+
+  const cached = key ? creations.get(key) : undefined;
+
+  if (cached) {
+
+    if (cached.fingerprint !== fingerprint) throw Errors.conflict('La clave de idempotencia ya se usó con otros datos.');
+
+    return { ...await cached.result };
+
+  }
+
+  const input = { ...data, storeLocation: data.storeLocation ?? null, motorcycleModel: data.motorcycleModel ?? null, createdBy: user.id };
+
+  const result = ticketsRepository.create(input);
+
+  if (key) creations.set(key, { fingerprint, result });
+
+  let ticket: Ticket;
+
+  try { ticket = await result; }
+
+  catch (cause) { if (key) creations.delete(key); throw cause; }
+
+  recordAudit({
+
+    action: 'ticket.created',
+
+    entity: 'ticket',
+
+    entityId: ticket.id,
+
+    actorId: user.id,
+
+  });
+
+  return { ...ticket };
+
+}
+
+export async function listTickets(
+
+  user: AuthUser,
+
+  q: {
+
+    status?: TicketStatus;
+
+    priorityId?: number;
+
+    categoryId?: number;
+
+  },
+
+): Promise<Ticket[]> {
+
+  const filter: TicketFilter = { ...q, visibleTo: null };
+
+  const tickets = await ticketsRepository.list(filter);
+
+  return Promise.all(
+
+    tickets
+
+      .filter(ticketVisibilityFilter(user))
+
+      .map(withTechnicianName),
+
+  );
+
+}
+
+export async function setPriority(
+
+  id: number,
+
+  priorityId: number,
+
+  user: AuthUser,
+  options: {
+    expectedVersion: number;
+    reason?: string;
+  },
+
+): Promise<Ticket> {
+
+  if (!can(user, PERMISSIONS.TICKETS_PRIORITY_UPDATE)) {
+
+    throw Errors.forbidden('Only managers can set the priority.');
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
+  // No permitir cambiar prioridad de tickets cerrados
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se puede cambiar la prioridad de un ticket cerrado.');
+  }
+
+  // Control de concurrencia: verificar versión
+  if (ticket.version !== options.expectedVersion) {
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
+  }
+
+  // No generar evento falso si la prioridad es la misma
+  if (ticket.priorityId === priorityId) {
+    return ticket;
+  }
+
+  const from = ticket.priorityId;
+
+  ticket.priorityId = priorityId;
+
+  const saved = await saveWithHistory(ticket, [{
+
+    actorId: user.id,
+
+    action: 'priority_changed',
+
+    from,
+
+    to: priorityId,
+    reason: options.reason ?? null,
+  }]);
+
+  recordAudit({
+
+    action: 'ticket.priority_changed',
+
+    entity: 'ticket',
+
+    entityId: id,
+
+    actorId: user.id,
+    metadata: { from, to: priorityId, reason: options.reason ?? null },
+  });
+
+  return saved;
+
 }
 
 export async function assignTechnician(
+
   id: number,
+
   technicianId: number,
+
   dueDate: string | undefined,
+
   user: AuthUser,
+
+  options: {
+
+    expectedVersion: number;
+
+    reason?: string;
+
+  },
+
 ): Promise<Ticket> {
+
   if (!can(user, PERMISSIONS.TICKETS_ASSIGN)) {
+
     throw Errors.forbidden(
+
       'Only service advisors can assign tickets.',
+
     );
+
   }
 
   return withTechnicianLifecycleLock(
+
     technicianId,
+
     async () => {
+
       if (!(await isActiveTechnician(technicianId))) {
+
         throw Errors.validation([
+
           {
+
             field: 'technicianId',
+
             message: 'The user is not an active technician.',
+
           },
+
         ]);
+
       }
 
-      // Consultar el ticket después de esperar la validación,
-      // para trabajar con su estado actual.
-      const ticket = getTicketForUser(id, user);
+      const ticket = await getTicketForUser(id, user);
+
+      if (ticket.version !== options.expectedVersion) {
+
+        throw Errors.conflict(
+
+          'El ticket cambió. Actualiza la información antes de asignar.',
+
+        );
+
+      }
 
       if (
+
         ticket.status !== 'Open' &&
+
         ticket.status !== 'Assigned'
+
       ) {
+
         throw Errors.invalidState(
+
           `A ticket in status "${ticket.status}" cannot be (re)assigned.`,
+
         );
+
+      }
+
+      if (
+
+        dueDate !== undefined &&
+
+        (
+
+          ticket.dueDate === null ||
+
+          new Date(dueDate).getTime() !==
+
+            new Date(ticket.dueDate).getTime()
+
+        )
+
+      ) {
+
+        throw Errors.validation([
+
+          {
+
+            field: 'dueDate',
+
+            message:
+
+              'La asignación no permite modificar el plazo del ticket.',
+
+          },
+
+        ]);
+
+      }
+
+      if (ticket.assignedTechnicianId === technicianId) {
+
+        return ticket;
+
       }
 
       const from = ticket.assignedTechnicianId;
 
+      const entries: HistoryInput[] = [];
+
       ticket.assignedTechnicianId = technicianId;
-      ticket.dueDate = dueDate ?? ticket.dueDate;
 
       if (ticket.status === 'Open') {
-        moveTo(ticket, 'Assigned', user);
-      } else {
-        repo.save(ticket);
+
+        entries.push(
+
+          transition(ticket, 'Assigned', user),
+
+        );
+
       }
 
-      repo.addHistory({
-        ticketId: id,
+      entries.push({
+
         actorId: user.id,
+
         action: 'assigned',
+
         from,
+
         to: technicianId,
+
+        reason: options.reason ?? null,
+
       });
 
+      const saved = await saveWithHistory(ticket, entries);
+
+      for (const entry of entries) {
+
+        if (entry.action === 'status_changed') {
+
+          publishStatus(saved, entry);
+
+        }
+
+      }
+
       recordAudit({
+
         action: 'ticket.assigned',
+
         entity: 'ticket',
+
         entityId: id,
+
         actorId: user.id,
-        metadata: { from, to: technicianId },
+
+        metadata: {
+
+          from,
+
+          to: technicianId,
+
+          reason: options.reason ?? null,
+
+        },
+
       });
 
       notify(
+
         technicianId,
+
         'ticket.assigned',
+
         `Ticket #${id} was assigned to you.`,
+
         { entity: 'ticket', id },
+
       );
 
-      return ticket;
+      return saved;
+
     },
+
   );
+
 }
 
-export function changeStatus(id: number, to: TicketStatus, user: AuthUser): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_STATUS_UPDATE)) throw Errors.forbidden();
-  const ticket = getTicketForUser(id, user);
-  mustBeAssignedTechnicianOrStaff(ticket, user);
-  if (to === 'Assigned' || to === 'Resolved' || to === 'Closed') {
-    throw Errors.validation([
-      {
-        field: 'status',
-        message: `Use the dedicated endpoint for "${to}" (assignment / resolution / close).`,
-      },
-    ]);
+export async function changeStatus(
+
+  id: number,
+
+  to: TicketStatus,
+
+  user: AuthUser,
+
+): Promise<Ticket> {
+
+  if (!can(user, PERMISSIONS.TICKETS_STATUS_UPDATE)) {
+
+    throw Errors.forbidden();
+
   }
-  moveTo(ticket, to, user);
-  return ticket;
+
+  const ticket = await getTicketForUser(id, user);
+
+  mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  if (
+
+    to === 'Assigned' ||
+
+    to === 'Resolved' ||
+
+    to === 'Closed'
+
+  ) {
+
+    throw Errors.validation([
+
+      {
+
+        field: 'status',
+
+        message:
+
+          `Use the dedicated endpoint for "${to}" (assignment / resolution / close).`,
+
+      },
+
+    ]);
+
+  }
+
+  const entry = transition(ticket, to, user);
+
+  const saved = await saveWithHistory(ticket, [entry]);
+
+  publishStatus(saved, entry);
+
+  return saved;
+
 }
 
-export function resolveTicket(id: number, resolution: string, user: AuthUser): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_RESOLVE)) throw Errors.forbidden();
-  const ticket = getTicketForUser(id, user);
+export async function resolveTicket(
+
+  id: number,
+
+  resolution: string,
+
+  user: AuthUser,
+
+): Promise<Ticket> {
+
+  if (!can(user, PERMISSIONS.TICKETS_RESOLVE)) {
+
+    throw Errors.forbidden();
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
   mustBeAssignedTechnicianOrStaff(ticket, user);
-  moveTo(ticket, 'Resolved', user);
+
+  const entry = transition(ticket, 'Resolved', user);
+
   ticket.resolution = resolution;
+
   ticket.resolvedAt = new Date().toISOString();
-  repo.save(ticket);
-  return ticket;
+
+  const saved = await saveWithHistory(ticket, [entry]);
+
+  publishStatus(saved, entry);
+
+  return saved;
+
 }
 
-export function closeTicket(id: number, comment: string | undefined, user: AuthUser): Ticket {
-  if (!can(user, PERMISSIONS.TICKETS_CLOSE)) throw Errors.forbidden();
-  const ticket = getTicketForUser(id, user);
+export async function closeTicket(
+
+  id: number,
+
+  comment: string | undefined,
+
+  user: AuthUser,
+
+): Promise<Ticket> {
+
+  if (!can(user, PERMISSIONS.TICKETS_CLOSE)) {
+
+    throw Errors.forbidden();
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
   mustBeAssignedTechnicianOrStaff(ticket, user);
-  moveTo(ticket, 'Closed', user);
+
+  const entry = transition(ticket, 'Closed', user);
+
   ticket.closedAt = new Date().toISOString();
-  repo.save(ticket);
-  if (comment) repo.addHistory({ ticketId: id, actorId: user.id, action: 'closed_comment', to: comment });
-  return ticket;
+
+  const entries: HistoryInput[] = [entry];
+
+  if (comment) {
+
+    entries.push({
+
+      actorId: user.id,
+
+      action: 'closed_comment',
+
+      to: comment,
+
+    });
+
+  }
+
+  const saved = await saveWithHistory(ticket, entries);
+
+  publishStatus(saved, entry);
+
+  return saved;
+
 }
 
-export function ticketHistory(id: number, user: AuthUser) {
-  getTicketForUser(id, user);
-  return repo.historyOf(id);
+export async function ticketHistory(
+
+  id: number,
+
+  user: AuthUser,
+
+) {
+
+  const ticket = await getTicketForUser(id, user);
+  const entries = await ticketsRepository.historyOf(id);
+  return canReadInternalHistory(ticket, user) ? entries : publicUpdates(entries);
+
+}
+
+export async function eligibleTechnicians(
+
+  id: number,
+
+  user: AuthUser,
+
+): Promise<{ id: number; name: string }[]> {
+
+  if (!can(user, PERMISSIONS.TICKETS_ASSIGN)) {
+
+    throw Errors.forbidden(
+
+      'Only service advisors can assign tickets.',
+
+    );
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
+  if (
+
+    ticket.status !== 'Open' &&
+
+    ticket.status !== 'Assigned'
+
+  ) {
+
+    throw Errors.invalidState(
+
+      `A ticket in status "${ticket.status}" cannot be (re)assigned.`,
+
+    );
+
+  }
+
+  return listActiveTechnicians();
+
+}
+
+export async function updateCategory(
+
+  id: number,
+
+  categoryId: number,
+
+  user: AuthUser,
+
+): Promise<Ticket> {
+
+  // Solo Service Advisor y Manager pueden reclasificar (NFR-001)
+
+  if (!user.roles.some(role => role === 'Service Advisor' || role === 'Manager')) {
+
+    throw Errors.forbidden('Solo asesores y gerentes pueden reclasificar tickets.');
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
+  canReclassify(ticket); // Valida que no esté cerrado
+
+  if (ticket.categoryId === categoryId) {
+
+    return ticket; // No hay cambio, no registramos historial
+
+  }
+
+  const from = ticket.categoryId;
+
+  ticket.categoryId = categoryId;
+
+  const saved = await saveWithHistory(ticket, [{
+
+    actorId: user.id,
+
+    action: 'category_changed',
+
+    from,
+
+    to: categoryId,
+
+  }]);
+
+  recordAudit({
+
+    action: 'ticket.category_changed',
+
+    entity: 'ticket',
+
+    entityId: id,
+
+    actorId: user.id,
+
+    metadata: { from, to: categoryId },
+
+  });
+
+  return saved;
+
+}
+
+export async function updateBusinessInfo(
+  id: number,
+  patch: { storeLocation?: string; motorcycleModel?: string; version: number },
+  user: AuthUser,
+): Promise<Ticket> {
+  const ticket = await getTicketForUser(id, user);
+
+  // Solo Advisor y Manager pueden editar
+  const canEdit = user.roles.some(role => role === 'Service Advisor' || role === 'Manager');
+  if (!canEdit) throw Errors.forbidden();
+
+  // No se puede editar un ticket cerrado
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se puede editar la información comercial de un ticket cerrado.');
+  }
+
+  // Versionado optimista
+  if (ticket.version !== patch.version) {
+    throw Errors.conflict('El ticket fue modificado por otro usuario.');
+  }
+
+  const from = {
+    storeLocation: ticket.storeLocation,
+    motorcycleModel: ticket.motorcycleModel,
+  };
+
+  if (patch.storeLocation !== undefined) ticket.storeLocation = patch.storeLocation;
+  if (patch.motorcycleModel !== undefined) ticket.motorcycleModel = patch.motorcycleModel;
+
+  const saved = await saveWithHistory(ticket, [{
+    actorId: user.id,
+    action: 'business_info_updated',
+    from,
+    to: {
+      storeLocation: ticket.storeLocation,
+      motorcycleModel: ticket.motorcycleModel,
+    },
+  }]);
+
+  recordAudit({
+    action: 'ticket.business_info_updated',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+    metadata: { from, to: patch },
+  });
+
+  return saved;
+}
+
+export async function updateTicket(
+  id: number,
+  patch: {
+    title?: string;
+    description?: string;
+    categoryId?: number;
+    version: number;
+  },
+  user: AuthUser,
+): Promise<Ticket> {
+  const ticket = await getTicketForUser(id, user);
+
+  const ownerEditing =
+    ticket.createdBy === user.id && ticket.status === 'Open';
+
+  const staffEditing =
+    can(user, PERMISSIONS.TICKETS_UPDATE) &&
+    can(user, PERMISSIONS.TICKETS_READ_ALL);
+
+  if (!ownerEditing && !staffEditing) {
+    throw Errors.forbidden();
+  }
+
+  if (ticket.version !== patch.version) {
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
+  }
+
+  const { version: _version, ...changes } = patch;
+  Object.assign(ticket, changes);
+
+  const saved = await saveWithHistory(ticket, [{
+    actorId: user.id,
+    action: 'updated',
+    to: patch,
+  }]);
+
+  recordAudit({
+    action: 'ticket.updated',
+    entity: 'ticket',
+    entityId: id,
+    actorId: user.id,
+  });
+
+  return saved;
 }

@@ -53,3 +53,11 @@ describe('cliente HTTP único', () => {
     await expect(api('/x')).rejects.toMatchObject({ kind: 'network', status: 0 })
   })
 })
+
+
+it('conserva la clave de idempotencia en el transporte común', async () => {
+  respond(201, { data: { id: 1 } })
+  await api('/tickets', { method: 'POST', body: { title: 'Prueba' }, headers: { 'Idempotency-Key': 'same-request' } })
+  const init = vi.mocked(fetch).mock.calls[0]![1] as RequestInit
+  expect(new Headers(init.headers).get('Idempotency-Key')).toBe('same-request')
+})
