@@ -10,3 +10,5 @@ coverage/
 repomix-output.xml
 repomix-output.xml
 repomix-output.xml
+.neon
+neon.ts
