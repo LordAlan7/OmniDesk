@@ -15,7 +15,7 @@ const ALLOWED: Record<string, string[]> = {
   users: ['audit'],
   auth: ['users', 'audit'],
   tickets: ['users', 'audit', 'notifications'],
-  files: ['tickets', 'audit'],
+  files: ['tickets', 'audit', 'users'],
   knowledge: ['files', 'audit'],
   ai: ['knowledge', 'tickets', 'audit'],
   reports: ['tickets'],
