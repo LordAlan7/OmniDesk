@@ -51,6 +51,8 @@ export interface TicketHistoryEntry {
   from?: unknown;
   to?: unknown;
   reason?: string | null;
+  /** Identificador de la petición que originó el evento (NFR-009). */
+  correlationId?: string | null;
   createdAt: string;
 }
 

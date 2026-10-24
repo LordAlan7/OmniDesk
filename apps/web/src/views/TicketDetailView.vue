@@ -215,7 +215,11 @@ function statusLabel(value: string): string {
 }
 
 function formatDate(value: string): string {
-  return new Date(value).toLocaleString('es-MX')
+  return new Date(value).toLocaleString('es-MX', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+    timeZoneName: 'short',
+  })
 }
 
 function historyDescription(
@@ -1131,7 +1135,7 @@ watch(
 
               <p>
                 {{ formatDate(entry.createdAt) }}
-                · Usuario #{{ entry.actorId }}
+                · {{ entry.actorName ?? `Usuario #${entry.actorId}` }}
               </p>
 
               <p v-if="entry.reason">

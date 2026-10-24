@@ -1,6 +1,9 @@
 import { assertStatusInvariants } from './tickets.lifecycle';
 import { Errors } from '../../shared/errors';
 import { getPool } from '../../shared/db/pool';
+import { currentCorrelationId } from '../../shared/context/requestContext';
+import { recordAuditInTransaction } from '../audit';
+import { ticketAuditFor } from './tickets.audit';
 import type { TicketFilter } from './tickets.repository';
 import type {
   Ticket,
@@ -35,6 +38,7 @@ interface HistoryRow {
   from_value: unknown;
   to_value: unknown;
   reason: string | null;
+  correlation_id: string | null;
   created_at: Date;
 }
 
@@ -116,16 +120,25 @@ export const postgresTicketsRepository = {
 
       await client.query(
         `INSERT INTO ticket_history (
-           ticket_id, actor_id, action, to_value
+           ticket_id, actor_id, action, to_value, correlation_id
          )
-         VALUES ($1, $2, $3, $4::jsonb)`,
+         VALUES ($1, $2, $3, $4::jsonb, $5)`,
         [
           row.id,
           data.createdBy,
           'created',
           JSON.stringify('Open'),
+          currentCorrelationId(),
         ],
       );
+
+      await recordAuditInTransaction(client, {
+        action: 'ticket.created',
+        entity: 'ticket',
+        entityId: row.id,
+        actorId: data.createdBy,
+        metadata: { to: 'Open' },
+      });
 
       await client.query('COMMIT');
       return toTicket(row);
@@ -217,9 +230,10 @@ export const postgresTicketsRepository = {
              action,
              from_value,
              to_value,
-             reason
+             reason,
+             correlation_id
            )
-           VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)`,
+           VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)`,
           [
             ticket.id,
             entry.actorId,
@@ -227,8 +241,13 @@ export const postgresTicketsRepository = {
             JSON.stringify(entry.from ?? null),
             JSON.stringify(entry.to ?? null),
             entry.reason ?? null,
+            currentCorrelationId(),
           ],
         );
+
+        // NFR-009: el evento de auditoría se confirma (o revierte) junto con el cambio.
+        const audit = ticketAuditFor(ticket.id, entry);
+        if (audit) await recordAuditInTransaction(client, audit);
       }
 
       await client.query('COMMIT');
@@ -293,36 +312,55 @@ export const postgresTicketsRepository = {
     return result.rows.map(toTicket);
   },
 
-  /** Evento de historial sin modificar el ticket (p. ej. notas de avance, FR-008). */
+  /** Evento de historial sin modificar el ticket (p. ej. notas de avance, FR-008). Historial y auditoría van en una transacción. */
   async addHistory(
     entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>,
   ): Promise<TicketHistoryEntry> {
-    const result = await getPool().query<HistoryRow>(
-      `INSERT INTO ticket_history (
-         ticket_id, actor_id, action, from_value, to_value, reason
-       )
-       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
-       RETURNING *`,
-      [
-        entry.ticketId,
-        entry.actorId,
-        entry.action,
-        JSON.stringify(entry.from ?? null),
-        JSON.stringify(entry.to ?? null),
-        entry.reason ?? null,
-      ],
-    );
-    const row = result.rows[0]!;
-    return {
-      id: row.id,
-      ticketId: row.ticket_id,
-      actorId: row.actor_id,
-      action: row.action,
-      from: row.from_value,
-      to: row.to_value,
-      reason: row.reason,
-      createdAt: row.created_at.toISOString(),
-    };
+    const client = await getPool().connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query<HistoryRow>(
+        `INSERT INTO ticket_history (
+           ticket_id, actor_id, action, from_value, to_value, reason, correlation_id
+         )
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+         RETURNING *`,
+        [
+          entry.ticketId,
+          entry.actorId,
+          entry.action,
+          JSON.stringify(entry.from ?? null),
+          JSON.stringify(entry.to ?? null),
+          entry.reason ?? null,
+          currentCorrelationId(),
+        ],
+      );
+
+      const audit = ticketAuditFor(entry.ticketId, entry);
+      if (audit) await recordAuditInTransaction(client, audit);
+
+      await client.query('COMMIT');
+
+      const row = result.rows[0]!;
+      return {
+        id: row.id,
+        ticketId: row.ticket_id,
+        actorId: row.actor_id,
+        action: row.action,
+        from: row.from_value,
+        to: row.to_value,
+        reason: row.reason,
+        correlationId: row.correlation_id,
+        createdAt: row.created_at.toISOString(),
+      };
+    } catch (cause) {
+      await client.query('ROLLBACK');
+      throw cause;
+    } finally {
+      client.release();
+    }
   },
 
   async historyOf(
@@ -344,6 +382,7 @@ export const postgresTicketsRepository = {
       from: row.from_value,
       to: row.to_value,
       reason: row.reason,
+      correlationId: row.correlation_id,
       createdAt: row.created_at.toISOString(),
     }));
   },

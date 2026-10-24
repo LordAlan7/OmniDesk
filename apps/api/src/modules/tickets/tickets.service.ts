@@ -17,7 +17,6 @@ import {
 
 } from '../../shared/authorization';
 
-import { recordAudit } from '../audit';
 
 import { notify } from '../notifications';
 
@@ -191,19 +190,6 @@ function publishStatus(
 
 ): void {
 
-  recordAudit({
-
-    action: 'ticket.status_changed',
-
-    entity: 'ticket',
-
-    entityId: ticket.id,
-
-    actorId: entry.actorId,
-
-    metadata: { from: entry.from, to: entry.to },
-
-  });
 
   notify(
 
@@ -265,17 +251,6 @@ export async function createTicket(
 
   catch (cause) { if (key) creations.delete(key); throw cause; }
 
-  recordAudit({
-
-    action: 'ticket.created',
-
-    entity: 'ticket',
-
-    entityId: ticket.id,
-
-    actorId: user.id,
-
-  });
 
   return { ...ticket };
 
@@ -372,17 +347,6 @@ export async function setPriority(
     reason: options.reason ?? null,
   }]);
 
-  recordAudit({
-
-    action: 'ticket.priority_changed',
-
-    entity: 'ticket',
-
-    entityId: id,
-
-    actorId: user.id,
-    metadata: { from, to: priorityId, reason: options.reason ?? null },
-  });
 
   return saved;
 
@@ -548,27 +512,6 @@ export async function assignTechnician(
 
       }
 
-      recordAudit({
-
-        action: 'ticket.assigned',
-
-        entity: 'ticket',
-
-        entityId: id,
-
-        actorId: user.id,
-
-        metadata: {
-
-          from,
-
-          to: technicianId,
-
-          reason: options.reason ?? null,
-
-        },
-
-      });
 
       notify(
 
@@ -746,7 +689,15 @@ export async function ticketHistory(
 
   const ticket = await getTicketForUser(id, user);
   const entries = await ticketsRepository.historyOf(id);
-  return canReadInternalHistory(ticket, user) ? entries : publicUpdates(entries);
+  if (!canReadInternalHistory(ticket, user)) return publicUpdates(entries);
+
+  // Autores resueltos por el servidor; la referencia histórica se conserva aunque la cuenta se desactive.
+  const names = new Map<number, string | null>();
+  for (const actorId of new Set(entries.map((entry) => entry.actorId))) {
+    names.set(actorId, (await findUserById(actorId))?.name ?? null);
+  }
+
+  return entries.map((entry) => ({ ...entry, actorName: names.get(entry.actorId) ?? null }));
 
 }
 
@@ -834,19 +785,6 @@ export async function updateCategory(
 
   }]);
 
-  recordAudit({
-
-    action: 'ticket.category_changed',
-
-    entity: 'ticket',
-
-    entityId: id,
-
-    actorId: user.id,
-
-    metadata: { from, to: categoryId },
-
-  });
 
   return saved;
 
@@ -891,13 +829,6 @@ export async function updateBusinessInfo(
     },
   }]);
 
-  recordAudit({
-    action: 'ticket.business_info_updated',
-    entity: 'ticket',
-    entityId: id,
-    actorId: user.id,
-    metadata: { from, to: patch },
-  });
 
   return saved;
 }
@@ -938,12 +869,6 @@ export async function updateTicket(
     to: patch,
   }]);
 
-  recordAudit({
-    action: 'ticket.updated',
-    entity: 'ticket',
-    entityId: id,
-    actorId: user.id,
-  });
 
   return saved;
 }
@@ -997,13 +922,6 @@ export async function setDeadline(
       reason: options.reason,
     },
   ]);
-  recordAudit({
-    action: 'ticket.deadline_changed',
-    entity: 'ticket',
-    entityId: id,
-    actorId: user.id,
-    metadata: { from: current, to: dueDate, reason: options.reason },
-  });
   return saved;
 }
 
@@ -1026,12 +944,6 @@ export async function addProgressUpdate(
     actorId: user.id,
     action: 'progress_update',
     to: note,
-  });
-  recordAudit({
-    action: 'ticket.progress_update',
-    entity: 'ticket',
-    entityId: id,
-    actorId: user.id,
   });
   return entry;
 }

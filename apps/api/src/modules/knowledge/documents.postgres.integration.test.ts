@@ -21,7 +21,7 @@ describeDatabase('FR-012 PostgreSQL integration', () => {
     await admin.query(`CREATE SCHEMA "${schema}"`);
     connection=new Pool({connectionString:testUrl,options:`-c search_path=${schema}`});
     spy=jest.spyOn(database,'getPool').mockReturnValue(connection);
-    for(const name of ['001_init.sql','002_users_constraints.sql','003_knowledge_documents.sql']) {
+    for(const name of ['001_init.sql','002_users_constraints.sql','003_knowledge_documents.sql','009_audit_traceability.sql']) {
       await connection.query(fs.readFileSync(path.join(__dirname,'../../../db/migrations',name),'utf8'));
     }
     // Auth uses the existing memory fixture in NODE_ENV=test; FK rows have matching IDs.

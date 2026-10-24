@@ -77,6 +77,12 @@ const router = createRouter({
       },
     },
     {
+      path: '/audit',
+      name: 'audit',
+      component: () => import('@/views/AuditView.vue'),
+      meta: { permissions: ['audit:read'] },
+    },
+    {
       path: '/users',
       name: 'users',
       component: () => import('@/views/UsersView.vue'),

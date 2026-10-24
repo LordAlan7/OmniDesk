@@ -43,6 +43,9 @@ export interface TicketHistoryEntry {
   from?: unknown
   to?: unknown
   reason?: string | null
+  /** Autor resuelto por el servidor (solo historial interno). */
+  actorName?: string | null
+  correlationId?: string | null
   createdAt: string
 }
 
