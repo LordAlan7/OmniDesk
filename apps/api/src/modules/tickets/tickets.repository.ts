@@ -1,6 +1,9 @@
 import { Errors } from '../../shared/errors';
 import { assertStatusInvariants } from './tickets.lifecycle';
 import { env } from '../../config/env';
+import { currentCorrelationId } from '../../shared/context/requestContext';
+import { recordAuditInMemory } from '../audit';
+import { ticketAuditFor } from './tickets.audit';
 import { Ticket, TicketHistoryEntry, TicketStatus } from './tickets.types';
 import { postgresTicketsRepository } from './tickets.postgres.repository';
 import type { RecurringProblemLink } from './tickets.types'; // Asegúrate de importarlo
@@ -68,7 +71,8 @@ const ticketsMemoryRepository = {
       version: 1,
     };
     tickets.push(ticket);
-    history.push({ id: nextHistoryId++, ticketId: ticket.id, actorId: data.createdBy, action: 'created', to: 'Open', createdAt: now });
+    history.push({ id: nextHistoryId++, ticketId: ticket.id, actorId: data.createdBy, action: 'created', to: 'Open', correlationId: currentCorrelationId(), createdAt: now });
+    recordAuditInMemory({ action: 'ticket.created', entity: 'ticket', entityId: ticket.id, actorId: data.createdBy, metadata: { to: 'Open' } });
     return { ...ticket };
   },
 
@@ -103,7 +107,9 @@ const ticketsMemoryRepository = {
     const now = new Date().toISOString();
     Object.assign(current, ticket, { version: expectedVersion + 1, updatedAt: now });
     for (const entry of entries) {
-      history.push({ ...entry, ticketId: current.id, id: nextHistoryId++, createdAt: now });
+      history.push({ ...entry, ticketId: current.id, id: nextHistoryId++, correlationId: currentCorrelationId(), createdAt: now });
+      const audit = ticketAuditFor(current.id, entry);
+      if (audit) recordAuditInMemory(audit);
     }
     return { ...current };
   },
@@ -120,9 +126,12 @@ const ticketsMemoryRepository = {
     const record = {
       ...entry,
       id: nextHistoryId++,
+      correlationId: currentCorrelationId(),
       createdAt: new Date().toISOString(),
     };
     history.push(record);
+    const audit = ticketAuditFor(entry.ticketId, entry);
+    if (audit) recordAuditInMemory(audit);
     return record;
   },
 

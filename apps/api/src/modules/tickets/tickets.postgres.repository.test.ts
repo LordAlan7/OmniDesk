@@ -34,9 +34,26 @@ it('commits the versioned update and JSON history together, preserving business 
   expect(update[0]).toContain('WHERE id = $11 AND version = $12');
   expect(update[1].slice(10)).toEqual([10, 1, 'Centro', 'FT150']);
   const event = query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO ticket_history'))!;
-  expect(event[1]).toEqual([10, 3, 'assigned', 'null', '2', 'Cambio de responsable']);
+  expect(event[1]).toEqual([10, 3, 'assigned', 'null', '2', 'Cambio de responsable', null]);
+  // NFR-009: la auditoría se confirma en la misma transacción que el cambio.
+  const calls = query.mock.calls.map(([sql]) => String(sql));
+  const auditAt = calls.findIndex((sql) => sql.includes('INSERT INTO audit_log'));
+  expect(auditAt).toBeGreaterThan(calls.findIndex((sql) => sql.startsWith('UPDATE')));
+  expect(auditAt).toBeLessThan(calls.lastIndexOf('COMMIT'));
+  expect(query.mock.calls[auditAt]![1].slice(0, 2)).toEqual(['ticket.assigned', 'ticket']);
   expect(query.mock.calls.at(-1)?.[0]).toBe('COMMIT');
   expect(release).toHaveBeenCalledTimes(1);
+});
+
+it('rolls back the ticket change when the audit insert fails (no change without audit)', async () => {
+  query.mockImplementation(async (sql: string) => {
+    if (sql.includes('INSERT INTO audit_log')) throw new Error('audit unavailable');
+    return { rows: sql.startsWith('UPDATE') ? [row] : [] };
+  });
+  await expect(repository.saveWithHistory(ticket, 1, [{ actorId: 3, action: 'assigned', to: 2 }])).rejects.toThrow('audit unavailable');
+  const calls = query.mock.calls.map(([sql]) => String(sql));
+  expect(calls).not.toContain('COMMIT');
+  expect(calls.at(-1)).toBe('ROLLBACK');
 });
 
 it('rolls back stale versions without inserting history', async () => {

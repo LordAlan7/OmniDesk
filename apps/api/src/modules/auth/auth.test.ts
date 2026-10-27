@@ -42,3 +42,16 @@ describe('auth', () => {
     expect(res.body.data.email).toBe('manager@company.com');
   });
 });
+
+describe('security headers and limits (NFR-002)', () => {
+  it('sends HSTS and hides the framework', async () => {
+    const res = await request(app).get('/api/v1/health');
+    expect(res.headers['strict-transport-security']).toContain('max-age=');
+    expect(res.headers['x-powered-by']).toBeUndefined();
+  });
+
+  it('never returns a stack trace for unknown routes', async () => {
+    const res = await request(app).get('/api/v1/nope');
+    expect(JSON.stringify(res.body)).not.toContain('at ');
+  });
+});

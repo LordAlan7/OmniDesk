@@ -19,7 +19,7 @@ async function seedUsers(): Promise<void> {
     ['Demo Administrator', 'admin@company.com', 'Administrator'],
   ];
 
-  const passwordHash = await bcrypt.hash('ChangeMe123!', 10);
+  const passwordHash = await bcrypt.hash('ChangeMe123!', env.bcryptCost);
 
   for (const [name, email, role] of accounts) {
     const existing = await postgresUsersRepository.findByEmail(email);

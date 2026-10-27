@@ -109,7 +109,7 @@ export async function createUser(
     email: data.email.trim().toLowerCase(),
     roles: [...data.roles],
     active: true,
-    passwordHash: await bcrypt.hash(data.password, 10),
+    passwordHash: await bcrypt.hash(data.password, env.bcryptCost),
   };
 
   if (useMemory && memory.findByEmail(account.email)) {

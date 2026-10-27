@@ -1,9 +1,10 @@
+import { currentCorrelationId } from '../../shared/context/requestContext';
 import type { DatabaseClient as PoolClient } from '../../shared/db/types';
 /** Persistent document events share the mutation's transaction. */
 export async function recordDocumentAudit(client: PoolClient, action: string, entityId: number,
   actorId: number, metadata: Record<string, unknown>) {
-  await client.query(`INSERT INTO audit_log(action,entity,entity_id,actor_id,metadata)
-    VALUES ($1,'knowledge_document',$2,$3,$4::jsonb)`, [action, entityId, actorId, JSON.stringify(metadata)]);
+  await client.query(`INSERT INTO audit_log(action,entity,entity_id,actor_id,metadata,correlation_id)
+    VALUES ($1,'knowledge_document',$2,$3,$4::jsonb,$5)`, [action, entityId, actorId, JSON.stringify(metadata), currentCorrelationId()]);
 }
 
 export async function readDocumentAudit(client: PoolClient, entityId: number) {

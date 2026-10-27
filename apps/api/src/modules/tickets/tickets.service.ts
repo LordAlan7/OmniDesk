@@ -1,5 +1,6 @@
 import { publicUpdates, canReadInternalHistory } from './tickets.tracking';
 import { canReclassify } from './tickets.lifecycle';
+import { TRANSITIONS, availableTransitions, isOverdue } from './tickets.deadline';
 import { Errors } from '../../shared/errors';
 
 import { AuthUser } from '../../shared/types';
@@ -16,7 +17,6 @@ import {
 
 } from '../../shared/authorization';
 
-import { recordAudit } from '../audit';
 
 import { notify } from '../notifications';
 
@@ -71,20 +71,6 @@ type HistoryInput = Omit<
 
 >;
 
-const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-
-  Open: ['Assigned'],
-
-  Assigned: ['In Progress'],
-
-  'In Progress': ['Resolved'],
-
-  Resolved: ['In Progress', 'Closed'],
-
-  Closed: [],
-
-};
-
 async function withTechnicianName(
 
   ticket: Ticket,
@@ -102,6 +88,7 @@ async function withTechnicianName(
     ...ticket,
 
     assignedTechnicianName: technician?.name ?? null,
+    isOverdue: isOverdue(ticket),
 
   };
 
@@ -205,19 +192,6 @@ function publishStatus(
 
 ): void {
 
-  recordAudit({
-
-    action: 'ticket.status_changed',
-
-    entity: 'ticket',
-
-    entityId: ticket.id,
-
-    actorId: entry.actorId,
-
-    metadata: { from: entry.from, to: entry.to },
-
-  });
 
   notify(
 
@@ -279,17 +253,6 @@ export async function createTicket(
 
   catch (cause) { if (key) creations.delete(key); throw cause; }
 
-  recordAudit({
-
-    action: 'ticket.created',
-
-    entity: 'ticket',
-
-    entityId: ticket.id,
-
-    actorId: user.id,
-
-  });
 
   return { ...ticket };
 
@@ -307,11 +270,15 @@ export async function listTickets(
 
     categoryId?: number;
 
+    overdue?: boolean;
+
   },
 
 ): Promise<Ticket[]> {
 
-  const filter: TicketFilter = { ...q, visibleTo: null };
+  const { overdue, ...rest } = q;
+
+  const filter: TicketFilter = { ...rest, visibleTo: null };
 
   const tickets = await ticketsRepository.list(filter);
 
@@ -320,6 +287,8 @@ export async function listTickets(
     tickets
 
       .filter(ticketVisibilityFilter(user))
+
+      .filter((t) => overdue === undefined || isOverdue(t) === overdue)
 
       .map(withTechnicianName),
 
@@ -380,17 +349,6 @@ export async function setPriority(
     reason: options.reason ?? null,
   }]);
 
-  recordAudit({
-
-    action: 'ticket.priority_changed',
-
-    entity: 'ticket',
-
-    entityId: id,
-
-    actorId: user.id,
-    metadata: { from, to: priorityId, reason: options.reason ?? null },
-  });
 
   return saved;
 
@@ -556,27 +514,6 @@ export async function assignTechnician(
 
       }
 
-      recordAudit({
-
-        action: 'ticket.assigned',
-
-        entity: 'ticket',
-
-        entityId: id,
-
-        actorId: user.id,
-
-        metadata: {
-
-          from,
-
-          to: technicianId,
-
-          reason: options.reason ?? null,
-
-        },
-
-      });
 
       notify(
 
@@ -606,6 +543,8 @@ export async function changeStatus(
 
   user: AuthUser,
 
+  expectedVersion?: number,
+
 ): Promise<Ticket> {
 
   if (!can(user, PERMISSIONS.TICKETS_STATUS_UPDATE)) {
@@ -617,6 +556,12 @@ export async function changeStatus(
   const ticket = await getTicketForUser(id, user);
 
   mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  if (expectedVersion !== undefined && ticket.version !== expectedVersion) {
+
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de cambiar el estado.');
+
+  }
 
   if (
 
@@ -746,7 +691,15 @@ export async function ticketHistory(
 
   const ticket = await getTicketForUser(id, user);
   const entries = await ticketsRepository.historyOf(id);
-  return canReadInternalHistory(ticket, user) ? entries : publicUpdates(entries);
+  if (!canReadInternalHistory(ticket, user)) return publicUpdates(entries);
+
+  // Autores resueltos por el servidor; la referencia histórica se conserva aunque la cuenta se desactive.
+  const names = new Map<number, string | null>();
+  for (const actorId of new Set(entries.map((entry) => entry.actorId))) {
+    names.set(actorId, (await findUserById(actorId))?.name ?? null);
+  }
+
+  return entries.map((entry) => ({ ...entry, actorName: names.get(entry.actorId) ?? null }));
 
 }
 
@@ -834,19 +787,6 @@ export async function updateCategory(
 
   }]);
 
-  recordAudit({
-
-    action: 'ticket.category_changed',
-
-    entity: 'ticket',
-
-    entityId: id,
-
-    actorId: user.id,
-
-    metadata: { from, to: categoryId },
-
-  });
 
   return saved;
 
@@ -891,13 +831,6 @@ export async function updateBusinessInfo(
     },
   }]);
 
-  recordAudit({
-    action: 'ticket.business_info_updated',
-    entity: 'ticket',
-    entityId: id,
-    actorId: user.id,
-    metadata: { from, to: patch },
-  });
 
   return saved;
 }
@@ -938,76 +871,81 @@ export async function updateTicket(
     to: patch,
   }]);
 
-  recordAudit({
-    action: 'ticket.updated',
-    entity: 'ticket',
-    entityId: id,
-    actorId: user.id,
-  });
 
   return saved;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// FR-019: Gestión de problemas recurrentes vinculados
-// ──────────────────────────────────────────────────────────────────────────────
-export async function linkRecurringProblem(
-  ticketId: number,
-  articleId: number,
-  user: AuthUser,
-): Promise<number[]> {
-  // Verificar que el usuario puede editar el ticket
-  const ticket = await getTicketForUser(ticketId, user);
-  mustBeAssignedTechnicianOrStaff(ticket, user);
 
-  // Verificar que el artículo existe y el usuario puede leerlo
-  const article = await getArticle(articleId, user);
-  if (!article.isRecurringProblem) {
+/** FR-008: transiciones que el usuario puede ejecutar ahora sobre el ticket. */
+export async function ticketAvailableTransitions(
+  id: number,
+  user: AuthUser,
+) {
+  const ticket = await getTicketForUser(id, user);
+  return availableTransitions(ticket, user);
+}
+
+/** FR-008: establece, modifica o elimina el plazo. Motivo obligatorio; no registra cambios idénticos. */
+export async function setDeadline(
+  id: number,
+  dueDate: string | null,
+  user: AuthUser,
+  options: { expectedVersion: number; reason: string },
+): Promise<Ticket> {
+  if (!can(user, PERMISSIONS.TICKETS_DEADLINE_UPDATE)) {
+    throw Errors.forbidden();
+  }
+  const ticket = await getTicketForUser(id, user);
+  if (ticket.version !== options.expectedVersion) {
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de modificar el plazo.');
+  }
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se puede modificar el plazo de un ticket cerrado.');
+  }
+  if (dueDate !== null && new Date(dueDate).getTime() <= Date.now()) {
     throw Errors.validation([
-      { field: 'articleId', message: 'El artículo no está marcado como problema recurrente.' },
+      { field: 'dueDate', message: 'El plazo debe ser una fecha futura.' },
     ]);
   }
+  const current = ticket.dueDate;
+  const unchanged =
+    dueDate === null
+      ? current === null
+      : current !== null && new Date(current).getTime() === new Date(dueDate).getTime();
+  if (unchanged) return ticket;
 
-  // Guardar el vínculo
-  await ticketsRepository.linkRecurringProblem(ticketId, articleId, user.id);
-
-  // Registrar en auditoría
-  recordAudit({
-    action: 'ticket.recurring_problem_linked',
-    entity: 'ticket',
-    entityId: ticketId,
-    actorId: user.id,
-    metadata: { articleId },
-  });
-
-  return ticketsRepository.getRecurringProblems(ticketId);
+  ticket.dueDate = dueDate;
+  const saved = await saveWithHistory(ticket, [
+    {
+      actorId: user.id,
+      action: 'deadline_changed',
+      from: current,
+      to: dueDate,
+      reason: options.reason,
+    },
+  ]);
+  return saved;
 }
 
-export async function unlinkRecurringProblem(
-  ticketId: number,
-  articleId: number,
+/** FR-008: nota de avance interna con autor y fecha (solo visible en el historial interno). */
+export async function addProgressUpdate(
+  id: number,
+  note: string,
   user: AuthUser,
-): Promise<number[]> {
-  const ticket = await getTicketForUser(ticketId, user);
+) {
+  if (!can(user, PERMISSIONS.TICKETS_PROGRESS_CREATE)) {
+    throw Errors.forbidden();
+  }
+  const ticket = await getTicketForUser(id, user);
   mustBeAssignedTechnicianOrStaff(ticket, user);
-
-  await ticketsRepository.unlinkRecurringProblem(ticketId, articleId);
-
-  recordAudit({
-    action: 'ticket.recurring_problem_unlinked',
-    entity: 'ticket',
-    entityId: ticketId,
+  if (ticket.status === 'Closed') {
+    throw Errors.invalidState('No se pueden registrar avances en un ticket cerrado.');
+  }
+  const entry = await ticketsRepository.addHistory({
+    ticketId: id,
     actorId: user.id,
-    metadata: { articleId },
+    action: 'progress_update',
+    to: note,
   });
-
-  return ticketsRepository.getRecurringProblems(ticketId);
-}
-
-export async function getRecurringProblems(
-  ticketId: number,
-  user: AuthUser,
-): Promise<number[]> {
-  await getTicketForUser(ticketId, user);
-  return ticketsRepository.getRecurringProblems(ticketId);
+  return entry;
 }

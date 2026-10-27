@@ -25,6 +25,8 @@ export const PERMISSIONS = {
   TICKETS_RESOLVE: 'tickets:resolve',
   TICKETS_CLOSE: 'tickets:close',
   TICKETS_HISTORY_READ: 'tickets:history:read',
+  TICKETS_DEADLINE_UPDATE: 'tickets:deadline:update',
+  TICKETS_PROGRESS_CREATE: 'tickets:progress:create',
 
   // Knowledge
   KNOWLEDGE_READ: 'knowledge:read',
