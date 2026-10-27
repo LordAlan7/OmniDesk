@@ -1,3 +1,4 @@
+
 import { apiRequest } from './api'
 
 export type TicketStatus =
@@ -50,6 +51,27 @@ export interface AssignmentInput {
   reason?: string
 }
 
+export interface Category {
+  id: number
+  name: string
+}
+
+export interface CreateTicketPayload {
+  title: string
+  description: string
+  categoryId: number
+  storeLocation: string
+  motorcycleModel: string
+}
+
+// Prioridades válidas según el backend.
+export const TICKET_PRIORITIES = [
+  { id: 1, name: 'Baja' },
+  { id: 2, name: 'Media' },
+  { id: 3, name: 'Alta' },
+  { id: 4, name: 'Crítica' },
+] as const
+
 export function listTickets(
   page = 1,
   limit = 10,
@@ -64,20 +86,26 @@ export function listTickets(
     query.set('status', status)
   }
 
-  return apiRequest<Ticket[]>(`/tickets?${query.toString()}`)
+  return apiRequest<Ticket[]>(
+    `/tickets?${query.toString()}`,
+  )
 }
 
 export async function getTicket(id: number): Promise<Ticket> {
-  const response = await apiRequest<Ticket>(`/tickets/${id}`)
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}`,
+  )
+
   return response.data
 }
 
 export async function getEligibleTechnicians(
   ticketId: number,
 ): Promise<TechnicianCandidate[]> {
-  const response = await apiRequest<TechnicianCandidate[]>(
-    `/tickets/${ticketId}/eligible-technicians`,
-  )
+  const response =
+    await apiRequest<TechnicianCandidate[]>(
+      `/tickets/${ticketId}/eligible-technicians`,
+    )
 
   return response.data
 }
@@ -106,26 +134,13 @@ export async function getTicketHistory(
 
   return response.data
 }
-export interface Category {
-  id: number
-  name: string
-}
 
-export interface CreateTicketPayload {
-  title: string
-  description: string
-  categoryId: number
-  storeLocation: string
-  motorcycleModel: string
-}
+export const getCategories = () =>
+  apiRequest<Category[]>('/ticket-categories')
 
-
-export const getCategories = () => apiRequest<Category[]>('/ticket-categories')
-
-export async function createTicket(payload: CreateTicketPayload) {
-  // Generamos una clave única para esta petición.
-  // Si el usuario hace doble clic, la segunda petición enviará la misma clave
-  // y el backend devolverá el ticket ya creado en lugar de hacer uno nuevo.
+export async function createTicket(
+  payload: CreateTicketPayload,
+) {
   const idempotencyKey = crypto.randomUUID()
 
   return apiRequest<Ticket>('/tickets', {
@@ -137,8 +152,10 @@ export async function createTicket(payload: CreateTicketPayload) {
   })
 }
 
-
-export async function changeTicketCategory(id: number, categoryId: number): Promise<void> {
+export async function changeTicketCategory(
+  id: number,
+  categoryId: number,
+): Promise<void> {
   await apiRequest(`/tickets/${id}/category`, {
     method: 'PATCH',
     body: JSON.stringify({ categoryId }),
@@ -147,10 +164,67 @@ export async function changeTicketCategory(id: number, categoryId: number): Prom
 
 export async function updateBusinessInformation(
   id: number,
-  input: { storeLocation?: string; motorcycleModel?: string; version: number },
+  input: {
+    storeLocation?: string
+    motorcycleModel?: string
+    version: number
+  },
 ): Promise<void> {
-  await apiRequest(`/tickets/${id}/business-information`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
+  await apiRequest(
+    `/tickets/${id}/business-information`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  )
+}
+
+// NFR-006: iniciar o reabrir trabajo.
+export async function changeTicketStatus(
+  id: number,
+  status: TicketStatus,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    },
+  )
+
+  return response.data
+}
+
+// NFR-006: registrar resolución.
+export async function resolveTicket(
+  id: number,
+  resolution: string,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}/resolution`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        resolution: resolution.trim(),
+      }),
+    },
+  )
+
+  return response.data
+}
+
+// NFR-006: actualizar prioridad como gerente.
+export async function updateTicketPriority(
+  id: number,
+  priorityId: number,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}/priority`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ priorityId }),
+    },
+  )
+
+  return response.data
 }

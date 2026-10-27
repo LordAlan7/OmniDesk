@@ -145,39 +145,103 @@ onMounted(() => {
           No hay tickets visibles con estos criterios.
         </p>
 
-        <div v-else class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Ticket</th>
-                <th scope="col">Estado</th>
-                <th scope="col">Técnico asignado</th>
-                <th scope="col">Detalle</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="ticket in tickets" :key="ticket.id">
-                <td>
-                  <strong>#{{ ticket.id }}</strong>
-                  {{ ticket.title }}
-                </td>
-                <td>{{ statusLabel(ticket.status) }}</td>
-               <td>
-  {{
-    'assignedTechnicianId' in ticket
-      ? (ticket.assignedTechnicianName || technicianLabel(ticket.assignedTechnicianId))
-      : 'No compartido'
-  }}
-</td>
-                <td>
-                  <RouterLink :to="`/tickets/${ticket.id}`">
-                    Ver ticket
-                  </RouterLink>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      
+<!-- Listado de tickets -->
+<div v-else class="tickets-results">
+
+  <!-- Vista de escritorio -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Ticket</th>
+          <th scope="col">Estado</th>
+          <th scope="col">Técnico asignado</th>
+          <th scope="col">Detalle</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        <tr
+          v-for="ticket in tickets"
+          :key="ticket.id"
+        >
+          <td>
+            <strong>#{{ ticket.id }}</strong>
+            {{ ticket.title }}
+          </td>
+
+          <td>
+            <span class="ticket-status">
+              {{ statusLabel(ticket.status) }}
+            </span>
+          </td>
+
+          <td>
+            {{
+              'assignedTechnicianId' in ticket
+                ? (
+                    ticket.assignedTechnicianName ||
+                    technicianLabel(ticket.assignedTechnicianId)
+                  )
+                : 'No compartido'
+            }}
+          </td>
+
+          <td>
+            <RouterLink :to="`/tickets/${ticket.id}`">
+              Ver ticket
+            </RouterLink>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Vista móvil -->
+  <div class="mobile-tickets">
+    <article
+      v-for="ticket in tickets"
+      :key="ticket.id"
+      class="mobile-ticket-card"
+    >
+      <div class="mobile-ticket-header">
+        <strong>Ticket #{{ ticket.id }}</strong>
+
+        <span class="ticket-status">
+          {{ statusLabel(ticket.status) }}
+        </span>
+      </div>
+
+      <h2>{{ ticket.title }}</h2>
+
+      <div class="mobile-ticket-info">
+        <p>
+          <strong>Técnico asignado</strong>
+        </p>
+
+        <p>
+          {{
+            'assignedTechnicianId' in ticket
+              ? (
+                  ticket.assignedTechnicianName ||
+                  technicianLabel(ticket.assignedTechnicianId)
+                )
+              : 'No compartido'
+          }}
+        </p>
+      </div>
+
+      <RouterLink
+        :to="`/tickets/${ticket.id}`"
+        class="mobile-detail-button"
+      >
+        Ver detalles
+      </RouterLink>
+    </article>
+  </div>
+</div>
+
 
         <footer>
           <span>
@@ -261,4 +325,112 @@ button:focus-visible, select:focus-visible, a:focus-visible {
 @media (max-width: 600px) {
   .tickets-page { padding: 16px; }
 }
+
+/* NFR-006: listado responsivo */
+
+.tickets-page,
+.tickets-page * {
+  box-sizing: border-box;
+}
+
+.tickets-results {
+  width: 100%;
+  min-width: 0;
+}
+
+.mobile-tickets {
+  display: none;
+}
+
+.ticket-status {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 20px;
+  background: #edf1fb;
+  color: #2457d6;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .tickets-page {
+    padding: 16px;
+  }
+
+  .card {
+    padding: 18px;
+  }
+
+  .table-wrap {
+    display: none;
+  }
+
+  .mobile-tickets {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mobile-ticket-card {
+    min-width: 0;
+    padding: 18px;
+    border: 1px solid #dce3ee;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  .mobile-ticket-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .mobile-ticket-card h2 {
+    font-size: 18px;
+    margin: 0 0 18px;
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-ticket-info {
+    border-top: 1px solid #e4e9f1;
+    padding-top: 12px;
+    margin-bottom: 18px;
+  }
+
+  .mobile-ticket-info p {
+    margin: 6px 0;
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-detail-button {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    background: #2457d6;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .filters {
+    align-items: stretch;
+  }
+
+  .filters select,
+  .filters button {
+    min-height: 44px;
+  }
+
+  footer {
+    align-items: flex-start;
+  }
+}
+
 </style>
