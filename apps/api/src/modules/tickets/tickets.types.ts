@@ -58,3 +58,10 @@ export interface Priority {
   description: string;
   sortOrder: number;
 }
+
+export interface RecurringProblemLink {
+  ticketId: number;
+  articleId: number;
+  linkedBy: number;
+  linkedAt: string;
+}

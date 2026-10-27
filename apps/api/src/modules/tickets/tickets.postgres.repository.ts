@@ -333,4 +333,49 @@ export const postgresTicketsRepository = {
 
     return result.rows[0]?.pending ?? false;
   },
+
+    // ──────────────────────────────────────────────────────────────────────────────
+  // FR-019: Problemas recurrentes vinculados
+  // ──────────────────────────────────────────────────────────────────────────────
+  async linkRecurringProblem(ticketId: number, articleId: number, linkedBy: number): Promise<void> {
+    try {
+      await getPool().query(
+        `INSERT INTO ticket_recurring_problems (ticket_id, article_id, linked_by)
+         VALUES ($1, $2, $3)`,
+        [ticketId, articleId, linkedBy],
+      );
+    } catch (error: any) {
+      // Si el código de error es 23505, significa que ya existe la relación (UNIQUE)
+      if (error.code === '23505') {
+        throw Errors.conflict('Este problema ya está vinculado a este ticket.');
+      }
+      // Si el código es 23503, la FK falló (el ticket o el artículo no existen)
+      if (error.code === '23503') {
+        throw Errors.validation([
+          { field: 'articleId', message: 'El artículo o el ticket no existe.' },
+        ]);
+      }
+      throw error;
+    }
+  },
+
+  async unlinkRecurringProblem(ticketId: number, articleId: number): Promise<void> {
+    const result = await getPool().query(
+      `DELETE FROM ticket_recurring_problems
+       WHERE ticket_id = $1 AND article_id = $2`,
+      [ticketId, articleId],
+    );
+    if (result.rowCount === 0) {
+      throw Errors.notFound('Vínculo de problema recurrente');
+    }
+  },
+
+  async getRecurringProblems(ticketId: number): Promise<number[]> {
+    const result = await getPool().query<{ article_id: number }>(
+      `SELECT article_id FROM ticket_recurring_problems
+       WHERE ticket_id = $1 ORDER BY linked_at ASC`,
+      [ticketId],
+    );
+    return result.rows.map((r) => r.article_id);
+  },
 };

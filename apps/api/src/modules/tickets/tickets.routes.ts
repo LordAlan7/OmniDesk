@@ -1,38 +1,26 @@
 import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
-import { categoryUpdateSchema, createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema } from './tickets.schemas';
+import {
+  createTicketSchema,
+  listTicketsSchema,
+  updateTicketSchema,
+  prioritySchema,
+  assignmentSchema,
+  statusSchema,
+  resolutionSchema,
+  closeSchema,
+  categoryUpdateSchema,
+  linkRecurringProblemSchema, // <-- IMPORT AGREGADO AQUÍ
+} from './tickets.schemas';
 import * as service from './tickets.service';
-import { businessInfoUpdateSchema } from './tickets.schemas';
-
-import { trackingQuery, listOwnTickets, ownTicket, trackingTicket, canReadInternalHistory } from './tickets.tracking';
 
 export const ticketsRouter = Router();
-
-ticketsRouter.get('/me/tickets', authenticate, async (req, res, next) => {
-  try {
-    const { page, limit, ...filters } = trackingQuery.parse(req.query);
-    paginated(res, await listOwnTickets(currentUser(req), filters), page, limit);
-  } catch (err) { next(err); }
-});
-
-ticketsRouter.get('/me/tickets/:id', authenticate, async (req, res, next) => {
-  try { ok(res, await ownTicket(parseId(req.params.id), currentUser(req))); }
-  catch (err) { next(err); }
-});
 
 // Endpoint para obtener categorías para el formulario
 ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) => {
   try {
     ok(res, await service.listCategories());
-  } catch (err) {
-    next(err);
-  }
-});
-
-ticketsRouter.get('/ticket-priorities', authenticate, async (_req, res, next) => {
-  try {
-    ok(res, await service.listPriorities());
   } catch (err) {
     next(err);
   }
@@ -51,11 +39,7 @@ ticketsRouter.post('/tickets', authenticate, async (req, res, next) => {
 ticketsRouter.get('/tickets', authenticate, async (req, res, next) => {
   try {
     const { page, limit, ...filters } = listTicketsSchema.parse(req.query);
-    const user = currentUser(req);
-    const tickets = await service.listTickets(user, filters);
-    const visible = await Promise.all(tickets.map(ticket =>
-      canReadInternalHistory(ticket, user) ? ticket : trackingTicket(ticket)));
-    paginated(res, visible, page, limit);
+    paginated(res, await service.listTickets(currentUser(req), filters), page, limit);
   } catch (err) {
     next(err);
   }
@@ -63,9 +47,7 @@ ticketsRouter.get('/tickets', authenticate, async (req, res, next) => {
 
 ticketsRouter.get('/tickets/:id', authenticate, async (req, res, next) => {
   try {
-    const user = currentUser(req);
-    const ticket = await service.getTicketForUser(parseId(req.params.id), user);
-    ok(res, canReadInternalHistory(ticket, user) ? ticket : await trackingTicket(ticket));
+    ok(res, await service.getTicketForUser(parseId(req.params.id), currentUser(req)));
   } catch (err) {
     next(err);
   }
@@ -82,13 +64,18 @@ ticketsRouter.patch('/tickets/:id', authenticate, async (req, res, next) => {
 
 ticketsRouter.patch('/tickets/:id/priority', authenticate, async (req, res, next) => {
   try {
+    // Aseguramos extraer expectedVersion y reason del schema actual
     const { priorityId, expectedVersion, reason } = prioritySchema.parse(req.body);
-    ok(res, await service.setPriority(
-      parseId(req.params.id),
-      priorityId,
-      currentUser(req),
-      { expectedVersion, reason },
-    ));
+    
+    ok(
+      res, 
+      await service.setPriority(
+        parseId(req.params.id), 
+        priorityId, 
+        currentUser(req),
+        { expectedVersion, reason }
+      )
+    );
   } catch (err) {
     next(err);
   }
@@ -164,10 +151,40 @@ ticketsRouter.patch('/tickets/:id/category', authenticate, async (req, res, next
   }
 });
 
-ticketsRouter.patch('/tickets/:id/business-information', authenticate, async (req, res, next) => {
+// ──────────────────────────────────────────────────────────────────────────────
+// FR-019: Problemas recurrentes (RUTAS AGREGADAS COMPLETAS)
+// ──────────────────────────────────────────────────────────────────────────────
+ticketsRouter.get('/tickets/:id/recurring-problems', authenticate, async (req, res, next) => {
   try {
-    const body = businessInfoUpdateSchema.parse(req.body);
-    ok(res, await service.updateBusinessInfo(parseId(req.params.id), body, currentUser(req)));
+    ok(res, await service.getRecurringProblems(parseId(req.params.id), currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.post('/tickets/:id/recurring-problems', authenticate, async (req, res, next) => {
+  try {
+    const { articleId } = linkRecurringProblemSchema.parse(req.body);
+    ok(
+      res,
+      await service.linkRecurringProblem(parseId(req.params.id), articleId, currentUser(req)),
+      201,
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.delete('/tickets/:id/recurring-problems/:articleId', authenticate, async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await service.unlinkRecurringProblem(
+        parseId(req.params.id),
+        parseId(req.params.articleId, 'articleId'),
+        currentUser(req),
+      ),
+    );
   } catch (err) {
     next(err);
   }

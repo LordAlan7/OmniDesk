@@ -49,6 +49,8 @@ import {
   TicketStatus,
 
 } from './tickets.types';
+import * as knowledgeService from '../knowledge';
+import { getArticle } from '../knowledge';
 
 const creations = new Map<string, { fingerprint: string; result: Promise<Ticket> }>();
 
@@ -944,4 +946,68 @@ export async function updateTicket(
   });
 
   return saved;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FR-019: Gestión de problemas recurrentes vinculados
+// ──────────────────────────────────────────────────────────────────────────────
+export async function linkRecurringProblem(
+  ticketId: number,
+  articleId: number,
+  user: AuthUser,
+): Promise<number[]> {
+  // Verificar que el usuario puede editar el ticket
+  const ticket = await getTicketForUser(ticketId, user);
+  mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  // Verificar que el artículo existe y el usuario puede leerlo
+  const article = await getArticle(articleId, user);
+  if (!article.isRecurringProblem) {
+    throw Errors.validation([
+      { field: 'articleId', message: 'El artículo no está marcado como problema recurrente.' },
+    ]);
+  }
+
+  // Guardar el vínculo
+  await ticketsRepository.linkRecurringProblem(ticketId, articleId, user.id);
+
+  // Registrar en auditoría
+  recordAudit({
+    action: 'ticket.recurring_problem_linked',
+    entity: 'ticket',
+    entityId: ticketId,
+    actorId: user.id,
+    metadata: { articleId },
+  });
+
+  return ticketsRepository.getRecurringProblems(ticketId);
+}
+
+export async function unlinkRecurringProblem(
+  ticketId: number,
+  articleId: number,
+  user: AuthUser,
+): Promise<number[]> {
+  const ticket = await getTicketForUser(ticketId, user);
+  mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  await ticketsRepository.unlinkRecurringProblem(ticketId, articleId);
+
+  recordAudit({
+    action: 'ticket.recurring_problem_unlinked',
+    entity: 'ticket',
+    entityId: ticketId,
+    actorId: user.id,
+    metadata: { articleId },
+  });
+
+  return ticketsRepository.getRecurringProblems(ticketId);
+}
+
+export async function getRecurringProblems(
+  ticketId: number,
+  user: AuthUser,
+): Promise<number[]> {
+  await getTicketForUser(ticketId, user);
+  return ticketsRepository.getRecurringProblems(ticketId);
 }

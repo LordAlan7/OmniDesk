@@ -165,3 +165,9 @@ export const categoryUpdateSchema = z
       .positive(MESSAGES.positiveInt('categoryId')),
   })
   .strict();
+
+  export const linkRecurringProblemSchema = z
+  .object({
+    articleId: z.number().int().positive(MESSAGES.positiveInt('articleId')),
+  })
+  .strict();
