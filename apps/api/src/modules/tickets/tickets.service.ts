@@ -2,8 +2,10 @@ import { publicUpdates, canReadInternalHistory } from './tickets.tracking';
 import { canReclassify } from './tickets.lifecycle';
 import { TRANSITIONS, availableTransitions, isOverdue } from './tickets.deadline';
 import { Errors } from '../../shared/errors';
-
 import { AuthUser } from '../../shared/types';
+import { recordAudit } from '../audit';
+import { getArticle } from '../knowledge';
+
 
 import {
 
@@ -49,9 +51,6 @@ import {
   TicketStatus,
 
 } from './tickets.types';
-import * as knowledgeService from '../knowledge';
-import { getArticle } from '../knowledge';
-
 const creations = new Map<string, { fingerprint: string; result: Promise<Ticket> }>();
 
 export async function listCategories() {
@@ -948,4 +947,68 @@ export async function addProgressUpdate(
     to: note,
   });
   return entry;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FR-019: Gestión de problemas recurrentes vinculados
+// ──────────────────────────────────────────────────────────────────────────────
+export async function linkRecurringProblem(
+  ticketId: number,
+  articleId: number,
+  user: AuthUser,
+): Promise<number[]> {
+  const ticket = await getTicketForUser(ticketId, user);
+  const isAssigned = ticket.assignedTechnicianId === user.id;
+  const isStaff = can(user, PERMISSIONS.TICKETS_READ_ALL);
+  if (!isAssigned && !isStaff) throw Errors.forbidden();
+
+  const article = await getArticle(articleId, user);
+  if (!article.isRecurringProblem) {
+    throw Errors.validation([
+      { field: 'articleId', message: 'El artículo no está marcado como problema recurrente.' },
+    ]);
+  }
+
+  await ticketsRepository.linkRecurringProblem(ticketId, articleId, user.id);
+
+  recordAudit({
+    action: 'ticket.recurring_problem_linked',
+    entity: 'ticket',
+    entityId: ticketId,
+    actorId: user.id,
+    metadata: { articleId },
+  });
+
+  return ticketsRepository.getRecurringProblems(ticketId);
+}
+
+export async function unlinkRecurringProblem(
+  ticketId: number,
+  articleId: number,
+  user: AuthUser,
+): Promise<number[]> {
+  const ticket = await getTicketForUser(ticketId, user);
+  const isAssigned = ticket.assignedTechnicianId === user.id;
+  const isStaff = can(user, PERMISSIONS.TICKETS_READ_ALL);
+  if (!isAssigned && !isStaff) throw Errors.forbidden();
+
+  await ticketsRepository.unlinkRecurringProblem(ticketId, articleId);
+
+  recordAudit({
+    action: 'ticket.recurring_problem_unlinked',
+    entity: 'ticket',
+    entityId: ticketId,
+    actorId: user.id,
+    metadata: { articleId },
+  });
+
+  return ticketsRepository.getRecurringProblems(ticketId);
+}
+
+export async function getRecurringProblems(
+  ticketId: number,
+  user: AuthUser,
+): Promise<number[]> {
+  await getTicketForUser(ticketId, user);
+  return ticketsRepository.getRecurringProblems(ticketId);
 }

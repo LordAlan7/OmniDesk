@@ -177,8 +177,11 @@ export const deadlineSchema = z
   })
   .strict();
 
-export const progressUpdateSchema = z
-  .object({
-    note: z.string().trim().min(1, MESSAGES.required('La nota de avance')).max(1000),
-  })
-  .strict();
+export const progressSchema = z.object({
+  note: z.string().trim().min(1),
+}).strict();
+
+export const linkRecurringProblemSchema = z.object({
+  articleId: z.number().int().positive(),
+}).strict();
+  

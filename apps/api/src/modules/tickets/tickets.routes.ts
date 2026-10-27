@@ -1,12 +1,24 @@
 import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
-import { categoryUpdateSchema, createTicketSchema, listTicketsSchema, updateTicketSchema, prioritySchema, assignmentSchema, statusSchema, resolutionSchema, closeSchema, deadlineSchema, progressUpdateSchema } from './tickets.schemas';
+import {
+  createTicketSchema,
+  listTicketsSchema,
+  updateTicketSchema,
+  prioritySchema,
+  assignmentSchema,
+  statusSchema,
+  resolutionSchema,
+  closeSchema,
+  categoryUpdateSchema,
+  linkRecurringProblemSchema,
+  deadlineSchema,
+  progressSchema,
+} from './tickets.schemas';
 import * as service from './tickets.service';
 
 export const ticketsRouter = Router();
 
-// Endpoint para obtener categorías para el formulario
 ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) => {
   try {
     ok(res, await service.listCategories());
@@ -53,17 +65,10 @@ ticketsRouter.patch('/tickets/:id', authenticate, async (req, res, next) => {
 
 ticketsRouter.patch('/tickets/:id/priority', authenticate, async (req, res, next) => {
   try {
-    // Aseguramos extraer expectedVersion y reason del schema actual
     const { priorityId, expectedVersion, reason } = prioritySchema.parse(req.body);
-    
     ok(
-      res, 
-      await service.setPriority(
-        parseId(req.params.id), 
-        priorityId, 
-        currentUser(req),
-        { expectedVersion, reason }
-      )
+      res,
+      await service.setPriority(parseId(req.params.id), priorityId, currentUser(req), { expectedVersion, reason })
     );
   } catch (err) {
     next(err);
@@ -75,13 +80,7 @@ ticketsRouter.patch('/tickets/:id/assignment', authenticate, async (req, res, ne
     const { technicianId, dueDate, expectedVersion, reason } = assignmentSchema.parse(req.body);
     ok(
       res,
-      await service.assignTechnician(
-        parseId(req.params.id),
-        technicianId,
-        dueDate,
-        currentUser(req),
-        { expectedVersion, reason },
-      ),
+      await service.assignTechnician(parseId(req.params.id), technicianId, dueDate, currentUser(req), { expectedVersion, reason })
     );
   } catch (err) {
     next(err);
@@ -90,8 +89,8 @@ ticketsRouter.patch('/tickets/:id/assignment', authenticate, async (req, res, ne
 
 ticketsRouter.patch('/tickets/:id/status', authenticate, async (req, res, next) => {
   try {
-    const { status, expectedVersion } = statusSchema.parse(req.body);
-    ok(res, await service.changeStatus(parseId(req.params.id), status, currentUser(req), expectedVersion));
+    const { status } = statusSchema.parse(req.body);
+    ok(res, await service.changeStatus(parseId(req.params.id), status, currentUser(req)));
   } catch (err) {
     next(err);
   }
@@ -141,17 +140,9 @@ ticketsRouter.patch('/tickets/:id/category', authenticate, async (req, res, next
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FR-019: Problemas recurrentes (RUTAS AGREGADAS COMPLETAS)
+// FR-008: Rutas de seguimiento (Alexis)
 // ──────────────────────────────────────────────────────────────────────────────
-ticketsRouter.get('/tickets/:id/recurring-problems', authenticate, async (req, res, next) => {
-  try {
-    ok(res, await service.getRecurringProblems(parseId(req.params.id), currentUser(req)));
-  } catch (err) {
-    next(err);
-  }
-});
-
-ticketsRouter.get('/tickets/:id/available-transitions', authenticate, async (req, res, next) => {
+ticketsRouter.get('/tickets/:id/transitions', authenticate, async (req, res, next) => {
   try {
     ok(res, await service.ticketAvailableTransitions(parseId(req.params.id), currentUser(req)));
   } catch (err) {
@@ -161,17 +152,56 @@ ticketsRouter.get('/tickets/:id/available-transitions', authenticate, async (req
 
 ticketsRouter.patch('/tickets/:id/deadline', authenticate, async (req, res, next) => {
   try {
-    const { dueDate, expectedVersion, reason } = deadlineSchema.parse(req.body);
-    ok(res, await service.setDeadline(parseId(req.params.id), dueDate, currentUser(req), { expectedVersion, reason }));
+    const body = deadlineSchema.parse(req.body);
+    ok(res, await service.setDeadline(parseId(req.params.id), body.dueDate, currentUser(req), { expectedVersion: body.expectedVersion, reason: body.reason }));
   } catch (err) {
     next(err);
   }
 });
 
-ticketsRouter.post('/tickets/:id/progress-updates', authenticate, async (req, res, next) => {
+ticketsRouter.post('/tickets/:id/progress', authenticate, async (req, res, next) => {
   try {
-    const { note } = progressUpdateSchema.parse(req.body);
-    ok(res, await service.addProgressUpdate(parseId(req.params.id), note, currentUser(req)), 201);
+    const body = progressSchema.parse(req.body);
+    ok(res, await service.addProgressUpdate(parseId(req.params.id), body.note, currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FR-019: Problemas recurrentes (Edgar)
+// ──────────────────────────────────────────────────────────────────────────────
+ticketsRouter.get('/tickets/:id/recurring-problems', authenticate, async (req, res, next) => {
+  try {
+    ok(res, await service.getRecurringProblems(parseId(req.params.id), currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.post('/tickets/:id/recurring-problems', authenticate, async (req, res, next) => {
+  try {
+    const { articleId } = linkRecurringProblemSchema.parse(req.body);
+    ok(
+      res,
+      await service.linkRecurringProblem(parseId(req.params.id), articleId, currentUser(req)),
+      201,
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+ticketsRouter.delete('/tickets/:id/recurring-problems/:articleId', authenticate, async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await service.unlinkRecurringProblem(
+        parseId(req.params.id),
+        parseId(req.params.articleId, 'articleId'),
+        currentUser(req),
+      ),
+    );
   } catch (err) {
     next(err);
   }
