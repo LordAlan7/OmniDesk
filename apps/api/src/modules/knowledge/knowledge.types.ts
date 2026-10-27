@@ -11,10 +11,16 @@ export interface KnowledgeArticle {
   createdAt: string;
   updatedAt: string;
   version: number;
+  
+  // NUEVOS FR-019:
+  isRecurringProblem: boolean;
+  symptoms: string | null;
+  verification: string | null;
 }
 
 export interface KnowledgeFilter {
   text?: string;
   categoryId?: number;
   status?: KnowledgeStatus;
+  isRecurringProblem?: boolean; // Filtro nuevo
 }
