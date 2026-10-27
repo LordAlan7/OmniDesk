@@ -1,3 +1,4 @@
+
 import { ApiError, apiRequest } from './api'
 
 export type TicketStatus =
@@ -20,7 +21,6 @@ export interface Ticket {
   assignedTechnicianId: number | null
   assignedTechnicianName?: string | null
   dueDate: string | null
-  /** Calculado por el servidor (FR-008): plazo vencido en un ticket aún en seguimiento. */
   isOverdue?: boolean
   resolution: string | null
   createdAt: string
@@ -43,7 +43,6 @@ export interface TicketHistoryEntry {
   from?: unknown
   to?: unknown
   reason?: string | null
-  /** Autor resuelto por el servidor (solo historial interno). */
   actorName?: string | null
   correlationId?: string | null
   createdAt: string
@@ -55,6 +54,28 @@ export interface AssignmentInput {
   reason?: string
 }
 
+export interface Category {
+  id: number
+  name: string
+}
+
+export interface CreateTicketPayload {
+  title: string
+  description: string
+  categoryId: number
+  storeLocation: string
+  motorcycleModel: string
+}
+
+// Prioridades visibles en la interfaz.
+export const TICKET_PRIORITIES = [
+  { id: 1, name: 'Baja' },
+  { id: 2, name: 'Media' },
+  { id: 3, name: 'Alta' },
+  { id: 4, name: 'Crítica' },
+] as const
+
+// Consulta de tickets con filtro de vencimiento FR-008.
 export function listTickets(
   page = 1,
   limit = 10,
@@ -74,20 +95,28 @@ export function listTickets(
     query.set('overdue', String(overdue))
   }
 
-  return apiRequest<Ticket[]>(`/tickets?${query.toString()}`)
+  return apiRequest<Ticket[]>(
+    `/tickets?${query.toString()}`,
+  )
 }
 
-export async function getTicket(id: number): Promise<Ticket> {
-  const response = await apiRequest<Ticket>(`/tickets/${id}`)
+export async function getTicket(
+  id: number,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}`,
+  )
+
   return response.data
 }
 
 export async function getEligibleTechnicians(
   ticketId: number,
 ): Promise<TechnicianCandidate[]> {
-  const response = await apiRequest<TechnicianCandidate[]>(
-    `/tickets/${ticketId}/eligible-technicians`,
-  )
+  const response =
+    await apiRequest<TechnicianCandidate[]>(
+      `/tickets/${ticketId}/eligible-technicians`,
+    )
 
   return response.data
 }
@@ -110,12 +139,15 @@ export async function assignTechnician(
 export async function getTicketHistory(
   ticketId: number,
 ): Promise<TicketHistoryEntry[]> {
-  const response = await apiRequest<TicketHistoryEntry[]>(
-    `/tickets/${ticketId}/history`,
-  )
+  const response =
+    await apiRequest<TicketHistoryEntry[]>(
+      `/tickets/${ticketId}/history`,
+    )
 
   return response.data
 }
+
+// FR-008: transiciones permitidas por el backend.
 export interface AvailableTransition {
   to: TicketStatus
   via: 'status' | 'resolution' | 'close'
@@ -125,33 +157,51 @@ export interface AvailableTransition {
 export async function getAvailableTransitions(
   ticketId: number,
 ): Promise<AvailableTransition[]> {
-  const response = await apiRequest<AvailableTransition[]>(
-    `/tickets/${ticketId}/available-transitions`,
-  )
+  const response =
+    await apiRequest<AvailableTransition[]>(
+      `/tickets/${ticketId}/available-transitions`,
+    )
 
   return response.data
 }
 
-/** Ejecuta una transición usando el endpoint que corresponde (estado, resolución o cierre). */
+// FR-008: ejecutar cambios de estado.
 export async function runTransition(
   ticketId: number,
   transition: AvailableTransition,
-  input: { expectedVersion: number; resolution?: string },
+  input: {
+    expectedVersion: number
+    resolution?: string
+  },
 ): Promise<Ticket> {
   const request =
     transition.via === 'resolution'
-      ? { path: 'resolution', body: { resolution: input.resolution ?? '' } }
+      ? {
+          path: 'resolution',
+          body: {
+            resolution: input.resolution ?? '',
+          },
+        }
       : transition.via === 'close'
-        ? { path: 'close', body: {} }
+        ? {
+            path: 'close',
+            body: {},
+          }
         : {
             path: 'status',
-            body: { status: transition.to, expectedVersion: input.expectedVersion },
+            body: {
+              status: transition.to,
+              expectedVersion: input.expectedVersion,
+            },
           }
 
   const response = await apiRequest<Ticket>(
     `/tickets/${ticketId}/${request.path}`,
     {
-      method: transition.via === 'status' ? 'PATCH' : 'POST',
+      method:
+        transition.via === 'status'
+          ? 'PATCH'
+          : 'POST',
       body: JSON.stringify(request.body),
     },
   )
@@ -159,50 +209,51 @@ export async function runTransition(
   return response.data
 }
 
+// FR-008: configurar plazos de atención.
 export async function setTicketDeadline(
   ticketId: number,
-  input: { dueDate: string | null; expectedVersion: number; reason: string },
+  input: {
+    dueDate: string | null
+    expectedVersion: number
+    reason: string
+  },
 ): Promise<Ticket> {
   const response = await apiRequest<Ticket>(
     `/tickets/${ticketId}/deadline`,
-    { method: 'PATCH', body: JSON.stringify(input) },
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
   )
 
   return response.data
 }
 
+// FR-008: registrar avances del ticket.
 export async function addProgressUpdate(
   ticketId: number,
   note: string,
 ): Promise<TicketHistoryEntry> {
-  const response = await apiRequest<TicketHistoryEntry>(
-    `/tickets/${ticketId}/progress-updates`,
-    { method: 'POST', body: JSON.stringify({ note }) },
-  )
+  const response =
+    await apiRequest<TicketHistoryEntry>(
+      `/tickets/${ticketId}/progress-updates`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      },
+    )
 
   return response.data
 }
 
-export interface Category {
-  id: number
-  name: string
-}
+// Consultar categorías.
+export const getCategories = () =>
+  apiRequest<Category[]>('/ticket-categories')
 
-export interface CreateTicketPayload {
-  title: string
-  description: string
-  categoryId: number
-  storeLocation: string
-  motorcycleModel: string
-}
-
-
-export const getCategories = () => apiRequest<Category[]>('/ticket-categories')
-
-export async function createTicket(payload: CreateTicketPayload) {
-  // Generamos una clave única para esta petición.
-  // Si el usuario hace doble clic, la segunda petición enviará la misma clave
-  // y el backend devolverá el ticket ya creado en lugar de hacer uno nuevo.
+// Crear ticket con idempotencia.
+export async function createTicket(
+  payload: CreateTicketPayload,
+) {
   const idempotencyKey = crypto.randomUUID()
 
   return apiRequest<Ticket>('/tickets', {
@@ -214,24 +265,89 @@ export async function createTicket(payload: CreateTicketPayload) {
   })
 }
 
-
-export async function changeTicketCategory(id: number, categoryId: number): Promise<void> {
-  await apiRequest(`/tickets/${id}/category`, {
-    method: 'PATCH',
-    body: JSON.stringify({ categoryId }),
-  })
+// Actualizar categoría.
+export async function changeTicketCategory(
+  id: number,
+  categoryId: number,
+): Promise<void> {
+  await apiRequest(
+    `/tickets/${id}/category`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ categoryId }),
+    },
+  )
 }
 
+// Actualizar información comercial.
 export async function updateBusinessInformation(
   id: number,
-  input: { storeLocation?: string; motorcycleModel?: string; version: number },
+  input: {
+    storeLocation?: string
+    motorcycleModel?: string
+    version: number
+  },
 ): Promise<void> {
-  await apiRequest(`/tickets/${id}/business-information`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
+  await apiRequest(
+    `/tickets/${id}/business-information`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  )
 }
 
+// NFR-006: iniciar o reabrir trabajo.
+export async function changeTicketStatus(
+  id: number,
+  status: TicketStatus,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    },
+  )
+
+  return response.data
+}
+
+// NFR-006: registrar resolución.
+export async function resolveTicket(
+  id: number,
+  resolution: string,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}/resolution`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        resolution: resolution.trim(),
+      }),
+    },
+  )
+
+  return response.data
+}
+
+// NFR-006: compatibilidad con el formulario de prioridad.
+export async function updateTicketPriority(
+  id: number,
+  priorityId: number,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(
+    `/tickets/${id}/priority`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ priorityId }),
+    },
+  )
+
+  return response.data
+}
+
+// Gestión de prioridades enriquecidas de develop.
 export interface Priority {
   id: number
   name: string
@@ -246,7 +362,10 @@ export interface PriorityInput {
 }
 
 export async function getPriorities(): Promise<Priority[]> {
-  const response = await apiRequest<Priority[]>('/ticket-priorities')
+  const response = await apiRequest<Priority[]>(
+    '/ticket-priorities',
+  )
+
   return response.data
 }
 
@@ -261,9 +380,11 @@ export async function updatePriority(
       body: JSON.stringify(input),
     },
   )
+
   return response.data
 }
 
+// Archivos adjuntos.
 export interface TicketAttachment {
   id: number
   ticketId: number
@@ -275,42 +396,84 @@ export interface TicketAttachment {
   createdAt: string
 }
 
-export async function getAttachments(ticketId: number): Promise<TicketAttachment[]> {
-  const response = await apiRequest<TicketAttachment[]>(`/tickets/${ticketId}/attachments`)
+export async function getAttachments(
+  ticketId: number,
+): Promise<TicketAttachment[]> {
+  const response =
+    await apiRequest<TicketAttachment[]>(
+      `/tickets/${ticketId}/attachments`,
+    )
+
   return response.data
 }
 
-export async function uploadAttachment(ticketId: number, file: File): Promise<TicketAttachment> {
+export async function uploadAttachment(
+  ticketId: number,
+  file: File,
+): Promise<TicketAttachment> {
   const formData = new FormData()
   formData.append('file', file)
-  
-  const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
+
+  const base = (
+    import.meta.env.VITE_API_URL ||
+    'http://localhost:3000/api/v1'
+  ).replace(/\/$/, '')
+
   const token = sessionStorage.getItem('omnidesk.token')
-  
-  const res = await fetch(`${base}/tickets/${ticketId}/attachments`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: formData,
-  })
-  
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({}))
-    throw new ApiError(error.error?.message || 'Error al subir archivo', res.status)
+
+  const response = await fetch(
+    `${base}/tickets/${ticketId}/attachments`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    },
+  )
+
+  if (!response.ok) {
+    const error = await response
+      .json()
+      .catch(() => ({}))
+
+    throw new ApiError(
+      error.error?.message || 'Error al subir archivo',
+      response.status,
+    )
   }
-  
-  return (await res.json()).data
+
+  return (await response.json()).data
 }
 
-export async function getAttachmentUrl(ticketId: number, attachmentId: number): Promise<string> {
-  const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
+export async function getAttachmentUrl(
+  ticketId: number,
+  attachmentId: number,
+): Promise<string> {
+  const base = (
+    import.meta.env.VITE_API_URL ||
+    'http://localhost:3000/api/v1'
+  ).replace(/\/$/, '')
+
   const token = sessionStorage.getItem('omnidesk.token')
-  
-  const res = await fetch(`${base}/tickets/${ticketId}/attachments/${attachmentId}/content`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  
-  if (!res.ok) throw new ApiError('Error al descargar', res.status)
-  
-  const blob = await res.blob()
+
+  const response = await fetch(
+    `${base}/tickets/${ticketId}/attachments/${attachmentId}/content`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  )
+
+  if (!response.ok) {
+    throw new ApiError(
+      'Error al descargar',
+      response.status,
+    )
+  }
+
+  const blob = await response.blob()
+
   return URL.createObjectURL(blob)
 }
