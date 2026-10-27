@@ -8,9 +8,12 @@ export { getTicketForUser } from './tickets.service';
 
 export {
   hasPendingTicketsForTechnician,
+  configureArticleReferenceChecker,
+  resolveApprovedArticleReference,
 } from './tickets.lifecycle';
 
 export type {
   Ticket,
   TicketStatus,
+  TicketInvestigation,
 } from './tickets.types';

@@ -52,6 +52,18 @@ export const AUDIT_EVENTS = {
     historyAction: 'progress_update',
     valuesInAudit: false,
   }),
+  // FR-009: investigación documentada por el técnico. El contenido (actividad, resultado,
+  // referencia a conocimiento) vive en ticket_investigations; la auditoría solo registra
+  // que ocurrió, quién y cuándo (NFR-009: valuesInAudit=false, igual que progress_update).
+  'ticket.investigation_logged': event('ticket', 'tickets', 'Actividad de investigación registrada (el contenido vive en ticket_investigations).', {
+    historyAction: 'investigation_logged',
+    valuesInAudit: false,
+  }),
+  // FR-009: reapertura de un ticket resuelto. El motivo (reason) es obligatorio y se
+  // conserva tanto en ticket_history.reason como en metadata.reason de la auditoría.
+  'ticket.reopened': event('ticket', 'tickets', 'Ticket reabierto desde Resolved a In Progress.', {
+    historyAction: 'reopened',
+  }),
   'ticket.attachment_uploaded': event('ticket', 'files', 'Archivo adjunto cargado.'),
   
   // NUEVAS: FR-019 (Problemas recurrentes)

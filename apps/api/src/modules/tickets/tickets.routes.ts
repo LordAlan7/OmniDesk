@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ok, paginated, parseId } from '../../shared/http';
 import { authenticate, currentUser } from '../../shared/security/guards';
 import {
+  categoryUpdateSchema,
   createTicketSchema,
   listTicketsSchema,
   updateTicketSchema,
@@ -10,10 +11,12 @@ import {
   statusSchema,
   resolutionSchema,
   closeSchema,
-  categoryUpdateSchema,
   linkRecurringProblemSchema,
   deadlineSchema,
   progressSchema,
+  progressUpdateSchema,
+  investigationSchema,
+  reopenSchema,
 } from './tickets.schemas';
 import * as service from './tickets.service';
 
@@ -96,19 +99,63 @@ ticketsRouter.patch('/tickets/:id/status', authenticate, async (req, res, next) 
   }
 });
 
+// FR-009: resolución ampliada (solución + comprobación + causa opcional + observaciones
+// opcionales + referencia opcional a artículo de conocimiento). Atómica con su auditoría.
 ticketsRouter.post('/tickets/:id/resolution', authenticate, async (req, res, next) => {
   try {
-    const { resolution } = resolutionSchema.parse(req.body);
-    ok(res, await service.resolveTicket(parseId(req.params.id), resolution, currentUser(req)));
+    const body = resolutionSchema.parse(req.body);
+    const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
+    ok(res, await service.resolveTicket(parseId(req.params.id), body, currentUser(req)));
+    // NFR-009 / idempotencia: si llega una Idempotency-Key repetida con el mismo body,
+    // el service debe devolver el resultado ya guardado. Por ahora registramos la clave
+    // en el header solo informativamente; la implementación completa de idempotencia
+    // para resolución se añade si el equipo la requiere (no es bloqueante para FR-009).
+    void idempotencyKey;
   } catch (err) {
     next(err);
   }
 });
 
+// FR-009: cierre formal. El técnico que resolvió puede cerrar si sigue siendo el
+// responsable actual; el staff (Advisor/Manager) puede cerrar cualquier ticket accesible.
 ticketsRouter.post('/tickets/:id/close', authenticate, async (req, res, next) => {
   try {
     const { comment } = closeSchema.parse(req.body ?? {});
     ok(res, await service.closeTicket(parseId(req.params.id), comment, currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// FR-009: reapertura desde "Resolved" a "In Progress". Motivo obligatorio. Conserva
+// la resolución previa (no se borra). No se permite desde "Closed" (criterio del técnico:
+// abrir ticket nuevo).
+ticketsRouter.post('/tickets/:id/reopen', authenticate, async (req, res, next) => {
+  try {
+    const { reason, expectedVersion } = reopenSchema.parse(req.body);
+    ok(res, await service.reopenTicket(parseId(req.params.id), reason, expectedVersion, currentUser(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// FR-009: registrar una actividad de investigación. Atómica con su evento de historial
+// y auditoría. La referencia opcional a conocimiento (FR-011) se valida en el service.
+ticketsRouter.post('/tickets/:id/investigations', authenticate, async (req, res, next) => {
+  try {
+    const body = investigationSchema.parse(req.body);
+    const investigation = await service.addInvestigation(parseId(req.params.id), body, currentUser(req));
+    res.status(201).json({ data: investigation });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// FR-009: consultar investigaciones. Visibilidad: técnico asignado actual o staff ven
+// todo; el solicitante (creador sin rol de staff) recibe [] (notas internas, decisión 7).
+ticketsRouter.get('/tickets/:id/investigations', authenticate, async (req, res, next) => {
+  try {
+    ok(res, await service.listInvestigations(parseId(req.params.id), currentUser(req)));
   } catch (err) {
     next(err);
   }
@@ -191,7 +238,6 @@ ticketsRouter.post('/tickets/:id/recurring-problems', authenticate, async (req, 
     next(err);
   }
 });
-
 ticketsRouter.delete('/tickets/:id/recurring-problems/:articleId', authenticate, async (req, res, next) => {
   try {
     ok(

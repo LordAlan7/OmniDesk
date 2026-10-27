@@ -4,4 +4,11 @@
  * Dependencias permitidas: files, audit
  */
 export { knowledgeRouter } from './knowledge.routes';
-export { getArticle } from './knowledge.service'; // <-- AGREGADO PARA FR-019
+
+// FR-009: punto de validación de referencias a artículos aprobados.
+// Lo usa app.ts para inyectar el validador en el módulo tickets (rompe el ciclo
+// tickets → knowledge → files → tickets). No requiere usuario: los artículos
+// aprobados son legibles por cualquier usuario autenticado (FR-011).
+export { findApprovedArticleById, getArticle  } from './knowledge.service';
+
+export type { KnowledgeArticle } from './knowledge.types';

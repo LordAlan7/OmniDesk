@@ -1,5 +1,5 @@
 import { publicUpdates, canReadInternalHistory } from './tickets.tracking';
-import { canReclassify } from './tickets.lifecycle';
+import { canReclassify, resolveApprovedArticleReference } from './tickets.lifecycle';
 import { TRANSITIONS, availableTransitions, isOverdue } from './tickets.deadline';
 import { Errors } from '../../shared/errors';
 import { AuthUser } from '../../shared/types';
@@ -47,6 +47,8 @@ import {
   Ticket,
 
   TicketHistoryEntry,
+
+  TicketInvestigation,
 
   TicketStatus,
 
@@ -153,6 +155,8 @@ function transition(
 
   user: AuthUser,
 
+  action: string = 'status_changed',
+
 ): HistoryInput {
 
   if (!TRANSITIONS[ticket.status].includes(to)) {
@@ -173,7 +177,7 @@ function transition(
 
     actorId: user.id,
 
-    action: 'status_changed',
+    action,
 
     from,
 
@@ -190,7 +194,6 @@ function publishStatus(
   entry: HistoryInput,
 
 ): void {
-
 
   notify(
 
@@ -211,8 +214,8 @@ export async function createTicket(
     title: string;
     description: string;
     categoryId: number;
-    storeLocation: string;      // NUEVO
-    motorcycleModel: string;    // NUEVO
+    storeLocation: string;
+    motorcycleModel: string;
   },
   user: AuthUser,
 
@@ -602,7 +605,19 @@ export async function resolveTicket(
 
   id: number,
 
-  resolution: string,
+  input: {
+
+    resolution: string;
+
+    resolutionVerification: string;
+
+    rootCause?: string;
+
+    observations?: string;
+
+    knowledgeArticleId?: number;
+
+  },
 
   user: AuthUser,
 
@@ -618,9 +633,30 @@ export async function resolveTicket(
 
   mustBeAssignedTechnicianOrStaff(ticket, user);
 
+  // FR-009: validar la referencia opcional al artículo de conocimiento (FR-011).
+  // resolveApprovedArticleReference lanza notFound/validation si el artículo no
+  // existe o no está aprobado. La ausencia de artículo NO impide resolver.
+  if (input.knowledgeArticleId !== undefined) {
+
+    const article = await resolveApprovedArticleReference(input.knowledgeArticleId);
+
+    ticket.knowledgeArticleId = article ? article.id : null;
+
+  } else {
+
+    ticket.knowledgeArticleId = null;
+
+  }
+
   const entry = transition(ticket, 'Resolved', user);
 
-  ticket.resolution = resolution;
+  ticket.resolution = input.resolution;
+
+  ticket.resolutionVerification = input.resolutionVerification;
+
+  ticket.rootCause = input.rootCause ? input.rootCause : null;
+
+  ticket.resolutionObservations = input.observations ? input.observations : null;
 
   ticket.resolvedAt = new Date().toISOString();
 
@@ -650,6 +686,10 @@ export async function closeTicket(
 
   const ticket = await getTicketForUser(id, user);
 
+  // FR-009 (decisión 1): el técnico que resolvió puede cerrar SI sigue siendo el
+  // responsable actual. La reasignación le transfiere el cierre al nuevo responsable
+  // (el técnico anterior deja de ver el ticket: getTicketForUser devuelve 404).
+  // El staff (Service Advisor, Manager) puede cerrar cualquier ticket accesible.
   mustBeAssignedTechnicianOrStaff(ticket, user);
 
   const entry = transition(ticket, 'Closed', user);
@@ -680,6 +720,203 @@ export async function closeTicket(
 
 }
 
+/**
+ * FR-009: reapertura de un ticket resuelto a "In Progress".
+ *
+ * Reglas:
+ * - Solo se puede reabrir un ticket en estado "Resolved" (no desde "Closed": si un
+ *   ticket cerrado necesita reabrirse, a criterio del técnico se abre uno nuevo).
+ * - El motivo (reason) es obligatorio y se conserva en el historial y la auditoría.
+ * - La resolución previa se CONSERVA (no se borra): queda como histórico. Si el
+ *   técnico vuelve a resolver, sobreescribe los campos con la nueva resolución.
+ * - Lo puede ejecutar el técnico asignado actual, Service Advisor o Manager
+ *   (todos con `tickets:status:update`).
+ */
+export async function reopenTicket(
+
+  id: number,
+
+  reason: string,
+
+  expectedVersion: number,
+
+  user: AuthUser,
+
+): Promise<Ticket> {
+
+  if (!can(user, PERMISSIONS.TICKETS_STATUS_UPDATE)) {
+
+    throw Errors.forbidden();
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
+  mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  if (ticket.status !== 'Resolved') {
+
+    throw Errors.invalidState(
+
+      'Solo se puede reabrir un ticket que esté en estado "Resolved".',
+
+    );
+
+  }
+
+  if (ticket.version !== expectedVersion) {
+
+    throw Errors.conflict('El ticket cambió. Actualiza la información antes de reabrir.');
+
+  }
+
+  const entry = transition(ticket, 'In Progress', user, 'reopened');
+
+  entry.reason = reason;
+
+  // La resolución previa se conserva: no limpiamos resolution, resolutionVerification,
+  // rootCause, resolutionObservations ni knowledgeArticleId. El ticket puede volver a
+  // resolverse y el técnico sobreescribe esos campos al llamar a resolveTicket.
+
+  const saved = await saveWithHistory(ticket, [entry]);
+
+  publishStatus(saved, entry);
+
+  return saved;
+
+}
+
+/**
+ * FR-009: registra una actividad de investigación sobre el ticket.
+ *
+ * Reglas:
+ * - El usuario debe tener `tickets:update` (Technician, Service Advisor, Manager).
+ * - Debe ser el técnico asignado actual o staff.
+ * - No se permiten investigaciones en tickets cerrados.
+ * - El `knowledgeArticleId` opcional se valida contra el hook inyectado desde `app.ts`
+ *   (que llama a `knowledge.findApprovedArticleById`). Si no existe o no está aprobado,
+ *   se rechaza con 400/404.
+ * - La ausencia de artículo NO impide registrar la investigación.
+ */
+export async function addInvestigation(
+
+  id: number,
+
+  input: {
+
+    activity: string;
+
+    result: string;
+
+    knowledgeArticleId?: number;
+
+  },
+
+  user: AuthUser,
+
+): Promise<TicketInvestigation> {
+
+  if (!can(user, PERMISSIONS.TICKETS_UPDATE)) {
+
+    throw Errors.forbidden();
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
+  mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  if (ticket.status === 'Closed') {
+
+    throw Errors.invalidState('No se pueden registrar investigaciones en un ticket cerrado.');
+
+  }
+
+  // FR-009 / FR-011: validar la referencia opcional al artículo de conocimiento.
+  let knowledgeArticleId: number | null = null;
+
+  if (input.knowledgeArticleId !== undefined) {
+
+    const article = await resolveApprovedArticleReference(input.knowledgeArticleId);
+
+    knowledgeArticleId = article ? article.id : null;
+
+  }
+
+  const investigation = await ticketsRepository.addInvestigation({
+
+    ticketId: id,
+
+    authorId: user.id,
+
+    activity: input.activity,
+
+    result: input.result,
+
+    knowledgeArticleId,
+
+  });
+
+  // Notificación al solicitante (FR-020): la investigación es interna, pero el
+  // solicitante sí debe saber que hay actividad en su ticket.
+  notify(
+
+    ticket.createdBy,
+
+    'ticket.investigation_logged',
+
+    `Se registró una actividad de investigación en tu ticket #${id}.`,
+
+    { entity: 'ticket', id },
+
+  );
+
+  return investigation;
+
+}
+
+/**
+ * FR-009: lista las investigaciones de un ticket.
+ *
+ * Visibilidad (FR-018 + decisión 7):
+ * - El técnico asignado actual las ve (es el autor o el responsable).
+ * - El staff (Service Advisor, Manager, con `tickets:read:all`) las ve.
+ * - El solicitante (creador, sin rol de staff) NO las ve: son notas internas.
+ *   La función devuelve un array vacío para él (no lanza 403 ni 404: el solicitante
+ *   sí puede ver el ticket, pero no las investigaciones internas).
+ */
+export async function listInvestigations(
+
+  id: number,
+
+  user: AuthUser,
+
+): Promise<TicketInvestigation[]> {
+
+  if (!can(user, PERMISSIONS.TICKETS_READ)) {
+
+    throw Errors.forbidden();
+
+  }
+
+  const ticket = await getTicketForUser(id, user);
+
+  const assigned = ticket.assignedTechnicianId === user.id;
+
+  const staff = can(user, PERMISSIONS.TICKETS_READ_ALL);
+
+  if (!assigned && !staff) {
+
+    // El solicitante no ve las investigaciones internas.
+
+    return [];
+
+  }
+
+  return ticketsRepository.listInvestigations(id);
+
+}
+
 export async function ticketHistory(
 
   id: number,
@@ -689,13 +926,19 @@ export async function ticketHistory(
 ) {
 
   const ticket = await getTicketForUser(id, user);
+
   const entries = await ticketsRepository.historyOf(id);
+
   if (!canReadInternalHistory(ticket, user)) return publicUpdates(entries);
 
   // Autores resueltos por el servidor; la referencia histórica se conserva aunque la cuenta se desactive.
+
   const names = new Map<number, string | null>();
+
   for (const actorId of new Set(entries.map((entry) => entry.actorId))) {
+
     names.set(actorId, (await findUserById(actorId))?.name ?? null);
+
   }
 
   return entries.map((entry) => ({ ...entry, actorName: names.get(entry.actorId) ?? null }));
@@ -948,7 +1191,6 @@ export async function addProgressUpdate(
   });
   return entry;
 }
-
 // ──────────────────────────────────────────────────────────────────────────────
 // FR-019: Gestión de problemas recurrentes vinculados
 // ──────────────────────────────────────────────────────────────────────────────

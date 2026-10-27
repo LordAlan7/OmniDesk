@@ -49,17 +49,26 @@ describe('NFR-001 · matriz de autorización', () => {
       expect(p.has(PERMISSIONS.TICKETS_ASSIGN)).toBe(true);
       expect(p.has(PERMISSIONS.TICKETS_CLOSE)).toBe(true);
       expect(p.has(PERMISSIONS.TICKETS_READ_ALL)).toBe(true);
+      expect(p.has(PERMISSIONS.TICKETS_DEADLINE_UPDATE)).toBe(true);
       expect(p.has(PERMISSIONS.TICKETS_PRIORITY_UPDATE)).toBe(false);
       expect(p.has(PERMISSIONS.TICKETS_RESOLVE)).toBe(false);
     });
 
-    it('Technician resuelve lo asignado, no asigna ni cierra', () => {
+    it('Technician resuelve y puede cerrar lo asignado, no asigna ni prioriza', () => {
       const p = permissionsForRoles(['Technician']);
+      // Sí puede
       expect(p.has(PERMISSIONS.TICKETS_RESOLVE)).toBe(true);
       expect(p.has(PERMISSIONS.TICKETS_STATUS_UPDATE)).toBe(true);
       expect(p.has(PERMISSIONS.TICKETS_UPDATE)).toBe(true);
+      // FR-009: el técnico que resolvió puede cerrar si sigue siendo el asignado
+      // actual. La reasignación le transfiere el cierre al nuevo responsable.
+      expect(p.has(PERMISSIONS.TICKETS_CLOSE)).toBe(true);
+      expect(p.has(PERMISSIONS.TICKETS_PROGRESS_CREATE)).toBe(true);
+      expect(p.has(PERMISSIONS.TICKETS_HISTORY_READ)).toBe(true);
+      // No puede
       expect(p.has(PERMISSIONS.TICKETS_ASSIGN)).toBe(false);
-      expect(p.has(PERMISSIONS.TICKETS_CLOSE)).toBe(false);
+      expect(p.has(PERMISSIONS.TICKETS_PRIORITY_UPDATE)).toBe(false);
+      expect(p.has(PERMISSIONS.TICKETS_DEADLINE_UPDATE)).toBe(false);
       expect(p.has(PERMISSIONS.TICKETS_READ_ALL)).toBe(false);
     });
 

@@ -17,12 +17,14 @@ import { aiRouter } from './modules/ai';
 import { auditRouter } from './modules/audit';
 import { authRouter } from './modules/auth';
 import { filesRouter } from './modules/files';
-import { knowledgeRouter } from './modules/knowledge';
+import { knowledgeRouter, findApprovedArticleById } from './modules/knowledge';
+import { getArticle } from './modules/knowledge/knowledge.service';
 import { notificationsRouter } from './modules/notifications';
 import { reportsRouter } from './modules/reports';
 import {
   ticketsRouter,
   hasPendingTicketsForTechnician,
+  configureArticleReferenceChecker,
 } from './modules/tickets';
 import {
   usersRouter,
@@ -31,11 +33,20 @@ import {
 } from './modules/users';
 import { ticketCategoriesRouter } from './modules/tickets/tickets.categories.routes';
 
+
+
 export function createApp() {
   configureAccountResolver(findUserById);
 
   configurePendingTicketsChecker(
     hasPendingTicketsForTechnician,
+  );
+
+// FR-009: el módulo tickets valida referencias a artículos de conocimiento (FR-011)
+// mediante inyección de dependencia. Así se rompe el ciclo
+// tickets → knowledge → files → tickets, respetando architecture.test.ts.
+  configureArticleReferenceChecker(
+    findApprovedArticleById
   );
 
   const app = express();
@@ -81,3 +92,4 @@ export function createApp() {
 
   return app;
 }
+

@@ -8,6 +8,7 @@ import type { TicketFilter } from './tickets.repository';
 import type {
   Ticket,
   TicketHistoryEntry,
+  TicketInvestigation,
 } from './tickets.types';
 
 interface TicketRow {
@@ -21,6 +22,10 @@ interface TicketRow {
   assigned_technician_id: number | null;
   due_date: Date | null;
   resolution: string | null;
+  resolution_verification: string | null;
+  root_cause: string | null;
+  resolution_observations: string | null;
+  knowledge_article_id: number | null;
   created_at: Date;
   updated_at: Date;
   resolved_at: Date | null;
@@ -59,6 +64,10 @@ function toTicket(row: TicketRow): Ticket {
     assignedTechnicianId: row.assigned_technician_id,
     dueDate: row.due_date?.toISOString() ?? null,
     resolution: row.resolution,
+    resolutionVerification: row.resolution_verification,
+    rootCause: row.root_cause,
+    resolutionObservations: row.resolution_observations,
+    knowledgeArticleId: row.knowledge_article_id,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     resolvedAt: row.resolved_at?.toISOString() ?? null,
@@ -66,6 +75,32 @@ function toTicket(row: TicketRow): Ticket {
     version: row.version,
     storeLocation: row.store_location,
     motorcycleModel: row.motorcycle_model,
+  };
+}
+
+interface InvestigationRow {
+  id: number;
+  ticket_id: number;
+  author_id: number;
+  activity: string;
+  result: string;
+  knowledge_article_id: number | null;
+  created_at: Date;
+  author_name: string;
+  knowledge_article_title: string | null;
+}
+
+function toInvestigation(row: InvestigationRow): TicketInvestigation {
+  return {
+    id: row.id,
+    ticketId: row.ticket_id,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    activity: row.activity,
+    result: row.result,
+    knowledgeArticleId: row.knowledge_article_id,
+    knowledgeArticleTitle: row.knowledge_article_title,
+    createdAt: row.created_at.toISOString(),
   };
 }
 
@@ -192,25 +227,33 @@ export const postgresTicketsRepository = {
              closed_at = $10,
              store_location = $13,
              motorcycle_model = $14,
+             resolution_verification = $15,
+             root_cause = $16,
+             resolution_observations = $17,
+             knowledge_article_id = $18,
              updated_at = clock_timestamp(),
              version = version + 1
          WHERE id = $11 AND version = $12
          RETURNING *`,
         [
-          ticket.title,
-          ticket.description,
-          ticket.categoryId,
-          ticket.priorityId,
-          ticket.status,
-          ticket.assignedTechnicianId,
-          ticket.dueDate,
-          ticket.resolution,
-          ticket.resolvedAt,
-          ticket.closedAt,
-          ticket.id,
-          expectedVersion,
-          ticket.storeLocation,
-          ticket.motorcycleModel,
+          ticket.title,                    // $1
+          ticket.description,              // $2
+          ticket.categoryId,               // $3
+          ticket.priorityId,               // $4
+          ticket.status,                   // $5
+          ticket.assignedTechnicianId,     // $6
+          ticket.dueDate,                  // $7
+          ticket.resolution,               // $8
+          ticket.resolvedAt,               // $9
+          ticket.closedAt,                  // $10
+          ticket.id,                       // $11 (WHERE)
+          expectedVersion,                  // $12 (WHERE)
+          ticket.storeLocation,             // $13
+          ticket.motorcycleModel,           // $14
+          ticket.resolutionVerification,    // $15
+          ticket.rootCause,                 // $16
+          ticket.resolutionObservations,    // $17
+          ticket.knowledgeArticleId,         // $18
         ],
       );
 
@@ -448,5 +491,80 @@ export const postgresTicketsRepository = {
       [ticketId],
     );
     return result.rows.map((r) => r.article_id);
+  },
+
+    /** FR-009: registra una actividad de investigación y su evento de historial + auditoría en una transacción. */
+  async addInvestigation(
+    input: Omit<TicketInvestigation, 'id' | 'createdAt' | 'authorName' | 'knowledgeArticleTitle'>,
+  ): Promise<TicketInvestigation> {
+    const client = await getPool().connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const insertResult = await client.query(
+        `INSERT INTO ticket_investigations (ticket_id, author_id, activity, result, knowledge_article_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [
+          input.ticketId,
+          input.authorId,
+          input.activity,
+          input.result,
+          input.knowledgeArticleId ?? null,
+        ],
+      );
+
+      const inserted = insertResult.rows[0];
+      if (!inserted) throw new Error('No se pudo registrar la investigación.');
+
+      // Evento en ticket_history (texto libre no se copia a audit_log: valuesInAudit=false).
+      await client.query(
+        `INSERT INTO ticket_history (ticket_id, actor_id, action, correlation_id)
+         VALUES ($1, $2, 'investigation_logged', $3)`,
+        [input.ticketId, input.authorId, currentCorrelationId()],
+      );
+
+      // NFR-009: el evento de auditoría se confirma (o revierte) junto con el cambio.
+      const audit = ticketAuditFor(input.ticketId, {
+        actorId: input.authorId,
+        action: 'investigation_logged',
+      });
+      if (audit) await recordAuditInTransaction(client, audit);
+
+      await client.query('COMMIT');
+
+      // Recarga con joins para resolver autor y título del artículo.
+      const result = await getPool().query<InvestigationRow>(
+        `SELECT i.*, u.name AS author_name, ka.title AS knowledge_article_title
+         FROM ticket_investigations i
+         JOIN users u ON u.id = i.author_id
+         LEFT JOIN knowledge_articles ka ON ka.id = i.knowledge_article_id
+         WHERE i.id = $1`,
+        [inserted.id],
+      );
+
+      return toInvestigation(result.rows[0]!);
+    } catch (cause) {
+      await client.query('ROLLBACK');
+      throw cause;
+    } finally {
+      client.release();
+    }
+  },
+
+  /** FR-009: lista las investigaciones de un ticket en orden cronológico, con autor y artículo. */
+  async listInvestigations(ticketId: number): Promise<TicketInvestigation[]> {
+    const result = await getPool().query<InvestigationRow>(
+      `SELECT i.*, u.name AS author_name, ka.title AS knowledge_article_title
+       FROM ticket_investigations i
+       JOIN users u ON u.id = i.author_id
+       LEFT JOIN knowledge_articles ka ON ka.id = i.knowledge_article_id
+       WHERE i.ticket_id = $1
+       ORDER BY i.id`,
+      [ticketId],
+    );
+
+    return result.rows.map(toInvestigation);
   },
 };

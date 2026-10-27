@@ -11,7 +11,9 @@ import { PERMISSIONS, type Permission } from './permissions';
  *     · Administrator gestiona cuentas; NO hace trabajo de negocio.
  *     · Manager prioriza y consulta métricas; NO asigna ni resuelve.
  *     · Service Advisor asigna y supervisa; NO cambia prioridad ni resuelve.
- *     · Technician resuelve lo asignado; el cierre lo hace el Advisor.
+ *     · Technician resuelve lo asignado y puede cerrarlo si sigue siendo el
+ *       responsable actual; la reasignación le transfiere el cierre al nuevo
+ *       responsable (FR-009: "a menos que pase la responsabilidad").
  */
 const MATRIX: Record<Role, readonly Permission[]> = {
   Employee: [
@@ -29,6 +31,7 @@ const MATRIX: Record<Role, readonly Permission[]> = {
     PERMISSIONS.TICKETS_UPDATE,
     PERMISSIONS.TICKETS_STATUS_UPDATE,
     PERMISSIONS.TICKETS_RESOLVE,
+    PERMISSIONS.TICKETS_CLOSE,
     PERMISSIONS.TICKETS_PROGRESS_CREATE,
     PERMISSIONS.TICKETS_HISTORY_READ,
     PERMISSIONS.KNOWLEDGE_READ,

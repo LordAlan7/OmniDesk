@@ -1,4 +1,3 @@
-
 import { ApiError, apiRequest } from './api'
 
 export type TicketStatus =
@@ -21,8 +20,14 @@ export interface Ticket {
   assignedTechnicianId: number | null
   assignedTechnicianName?: string | null
   dueDate: string | null
+  /** Calculado por el servidor (FR-008): plazo vencido en un ticket aún en seguimiento. */
   isOverdue?: boolean
   resolution: string | null
+  /** FR-009: comprobación del resultado (visible solo a staff, no al solicitante). */
+  resolutionVerification?: string | null
+  rootCause?: string | null
+  resolutionObservations?: string | null
+  knowledgeArticleId?: number | null
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
@@ -43,6 +48,7 @@ export interface TicketHistoryEntry {
   from?: unknown
   to?: unknown
   reason?: string | null
+  /** Autor resuelto por el servidor (solo historial interno). */
   actorName?: string | null
   correlationId?: string | null
   createdAt: string
@@ -54,28 +60,53 @@ export interface AssignmentInput {
   reason?: string
 }
 
-export interface Category {
+export interface AvailableTransition {
+  to: TicketStatus
+  via: 'status' | 'resolution' | 'close'
+  requiresResolution?: boolean
+}
+
+/** FR-009: actividad de investigación registrada por un técnico. */
+export interface TicketInvestigation {
   id: number
-  name: string
+  ticketId: number
+  authorId: number
+  authorName?: string | null
+  activity: string
+  result: string
+  knowledgeArticleId: number | null
+  knowledgeArticleTitle?: string | null
+  createdAt: string
 }
 
-export interface CreateTicketPayload {
+/** FR-009: input para registrar una actividad de investigación. */
+export interface InvestigationInput {
+  activity: string
+  result: string
+  knowledgeArticleId?: number
+}
+
+/** FR-009: input para resolver un ticket (campos ampliados). */
+export interface ResolutionInput {
+  resolution: string
+  resolutionVerification: string
+  rootCause?: string
+  observations?: string
+  knowledgeArticleId?: number
+}
+
+/** FR-009: input para reabrir un ticket resuelto. */
+export interface ReopenInput {
+  reason: string
+  expectedVersion: number
+}
+
+/** FR-011: artículo de conocimiento aprobado, para el dropdown de referencias. */
+export interface KnowledgeArticleOption {
+  id: number
   title: string
-  description: string
-  categoryId: number
-  storeLocation: string
-  motorcycleModel: string
 }
 
-// Prioridades visibles en la interfaz.
-export const TICKET_PRIORITIES = [
-  { id: 1, name: 'Baja' },
-  { id: 2, name: 'Media' },
-  { id: 3, name: 'Alta' },
-  { id: 4, name: 'Crítica' },
-] as const
-
-// Consulta de tickets con filtro de vencimiento FR-008.
 export function listTickets(
   page = 1,
   limit = 10,
@@ -95,28 +126,20 @@ export function listTickets(
     query.set('overdue', String(overdue))
   }
 
-  return apiRequest<Ticket[]>(
-    `/tickets?${query.toString()}`,
-  )
+  return apiRequest<Ticket[]>(`/tickets?${query.toString()}`)
 }
 
-export async function getTicket(
-  id: number,
-): Promise<Ticket> {
-  const response = await apiRequest<Ticket>(
-    `/tickets/${id}`,
-  )
-
+export async function getTicket(id: number): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(`/tickets/${id}`)
   return response.data
 }
 
 export async function getEligibleTechnicians(
   ticketId: number,
 ): Promise<TechnicianCandidate[]> {
-  const response =
-    await apiRequest<TechnicianCandidate[]>(
-      `/tickets/${ticketId}/eligible-technicians`,
-    )
+  const response = await apiRequest<TechnicianCandidate[]>(
+    `/tickets/${ticketId}/eligible-technicians`,
+  )
 
   return response.data
 }
@@ -139,121 +162,142 @@ export async function assignTechnician(
 export async function getTicketHistory(
   ticketId: number,
 ): Promise<TicketHistoryEntry[]> {
-  const response =
-    await apiRequest<TicketHistoryEntry[]>(
-      `/tickets/${ticketId}/history`,
-    )
+  const response = await apiRequest<TicketHistoryEntry[]>(
+    `/tickets/${ticketId}/history`,
+  )
 
   return response.data
-}
-
-// FR-008: transiciones permitidas por el backend.
-export interface AvailableTransition {
-  to: TicketStatus
-  via: 'status' | 'resolution' | 'close'
-  requiresResolution?: boolean
 }
 
 export async function getAvailableTransitions(
   ticketId: number,
 ): Promise<AvailableTransition[]> {
-  const response =
-    await apiRequest<AvailableTransition[]>(
-      `/tickets/${ticketId}/available-transitions`,
-    )
+  const response = await apiRequest<AvailableTransition[]>(
+    `/tickets/${ticketId}/available-transitions`,
+  )
 
   return response.data
 }
 
-// FR-008: ejecutar cambios de estado.
+/**
+ * Ejecuta una transición usando el endpoint que corresponde.
+ * FR-009: si la transición es Resolved → In Progress (reapertura), llama a /reopen
+ * con motivo obligatorio en lugar de /status.
+ */
 export async function runTransition(
   ticketId: number,
   transition: AvailableTransition,
   input: {
     expectedVersion: number
-    resolution?: string
+    resolution?: ResolutionInput
+    reason?: string
   },
+  currentStatus: TicketStatus,
 ): Promise<Ticket> {
-  const request =
-    transition.via === 'resolution'
-      ? {
-          path: 'resolution',
-          body: {
-            resolution: input.resolution ?? '',
-          },
-        }
-      : transition.via === 'close'
-        ? {
-            path: 'close',
-            body: {},
-          }
-        : {
-            path: 'status',
-            body: {
-              status: transition.to,
-              expectedVersion: input.expectedVersion,
-            },
-          }
+  // Detectar reapertura: Resolved → In Progress. El motivo es obligatorio.
+  const isReopen =
+    currentStatus === 'Resolved' &&
+    transition.to === 'In Progress' &&
+    transition.via === 'status'
 
-  const response = await apiRequest<Ticket>(
-    `/tickets/${ticketId}/${request.path}`,
-    {
-      method:
-        transition.via === 'status'
-          ? 'PATCH'
-          : 'POST',
-      body: JSON.stringify(request.body),
-    },
-  )
+  if (isReopen) {
+    if (!input.reason || !input.reason.trim()) {
+      throw new ApiError('El motivo de reapertura es obligatorio.', 400)
+    }
+    const response = await apiRequest<Ticket>(
+      `/tickets/${ticketId}/reopen`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: input.reason.trim(),
+          expectedVersion: input.expectedVersion,
+        }),
+      },
+    )
+    return response.data
+  }
 
+  if (transition.via === 'resolution') {
+    if (!input.resolution) {
+      throw new ApiError('Falta la resolución.', 400)
+    }
+    const response = await apiRequest<Ticket>(
+      `/tickets/${ticketId}/resolution`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input.resolution),
+      },
+    )
+    return response.data
+  }
+
+  if (transition.via === 'close') {
+    const response = await apiRequest<Ticket>(`/tickets/${ticketId}/close`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    return response.data
+  }
+
+  // Transición de estado común (no reapertura).
+  const response = await apiRequest<Ticket>(`/tickets/${ticketId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: transition.to,
+      expectedVersion: input.expectedVersion,
+    }),
+  })
   return response.data
 }
 
-// FR-008: configurar plazos de atención.
 export async function setTicketDeadline(
   ticketId: number,
-  input: {
-    dueDate: string | null
-    expectedVersion: number
-    reason: string
-  },
+  input: { dueDate: string | null; expectedVersion: number; reason: string },
 ): Promise<Ticket> {
   const response = await apiRequest<Ticket>(
     `/tickets/${ticketId}/deadline`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    },
+    { method: 'PATCH', body: JSON.stringify(input) },
   )
 
   return response.data
 }
 
-// FR-008: registrar avances del ticket.
 export async function addProgressUpdate(
   ticketId: number,
   note: string,
 ): Promise<TicketHistoryEntry> {
-  const response =
-    await apiRequest<TicketHistoryEntry>(
-      `/tickets/${ticketId}/progress-updates`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ note }),
-      },
-    )
+  const response = await apiRequest<TicketHistoryEntry>(
+    `/tickets/${ticketId}/progress-updates`,
+    { method: 'POST', body: JSON.stringify({ note }) },
+  )
 
   return response.data
 }
 
-// Consultar categorías.
-export const getCategories = () =>
-  apiRequest<Category[]>('/ticket-categories')
+export interface Category {
+  id: number
+  name: string
+}
 
-// Crear ticket con idempotencia.
-export async function createTicket(
-  payload: CreateTicketPayload,
-) {
+export interface CreateTicketPayload {
+  title: string
+  description: string
+  categoryId: number
+  storeLocation: string
+  motorcycleModel: string
+}
+
+// Etiquetas en español usadas por las vistas del NFR-006.
+export const TICKET_PRIORITIES = [
+  { id: 1, name: 'Baja' },
+  { id: 2, name: 'Media' },
+  { id: 3, name: 'Alta' },
+  { id: 4, name: 'Crítica' },
+] as const
+
+export const getCategories = () => apiRequest<Category[]>('/ticket-categories')
+
+export async function createTicket(payload: CreateTicketPayload) {
   const idempotencyKey = crypto.randomUUID()
 
   return apiRequest<Ticket>('/tickets', {
@@ -265,89 +309,23 @@ export async function createTicket(
   })
 }
 
-// Actualizar categoría.
-export async function changeTicketCategory(
-  id: number,
-  categoryId: number,
-): Promise<void> {
-  await apiRequest(
-    `/tickets/${id}/category`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ categoryId }),
-    },
-  )
+export async function changeTicketCategory(id: number, categoryId: number): Promise<void> {
+  await apiRequest(`/tickets/${id}/category`, {
+    method: 'PATCH',
+    body: JSON.stringify({ categoryId }),
+  })
 }
 
-// Actualizar información comercial.
 export async function updateBusinessInformation(
   id: number,
-  input: {
-    storeLocation?: string
-    motorcycleModel?: string
-    version: number
-  },
+  input: { storeLocation?: string; motorcycleModel?: string; version: number },
 ): Promise<void> {
-  await apiRequest(
-    `/tickets/${id}/business-information`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    },
-  )
+  await apiRequest(`/tickets/${id}/business-information`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
 }
 
-// NFR-006: iniciar o reabrir trabajo.
-export async function changeTicketStatus(
-  id: number,
-  status: TicketStatus,
-): Promise<Ticket> {
-  const response = await apiRequest<Ticket>(
-    `/tickets/${id}/status`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    },
-  )
-
-  return response.data
-}
-
-// NFR-006: registrar resolución.
-export async function resolveTicket(
-  id: number,
-  resolution: string,
-): Promise<Ticket> {
-  const response = await apiRequest<Ticket>(
-    `/tickets/${id}/resolution`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        resolution: resolution.trim(),
-      }),
-    },
-  )
-
-  return response.data
-}
-
-// NFR-006: compatibilidad con el formulario de prioridad.
-export async function updateTicketPriority(
-  id: number,
-  priorityId: number,
-): Promise<Ticket> {
-  const response = await apiRequest<Ticket>(
-    `/tickets/${id}/priority`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ priorityId }),
-    },
-  )
-
-  return response.data
-}
-
-// Gestión de prioridades enriquecidas de develop.
 export interface Priority {
   id: number
   name: string
@@ -362,10 +340,7 @@ export interface PriorityInput {
 }
 
 export async function getPriorities(): Promise<Priority[]> {
-  const response = await apiRequest<Priority[]>(
-    '/ticket-priorities',
-  )
-
+  const response = await apiRequest<Priority[]>('/ticket-priorities')
   return response.data
 }
 
@@ -380,11 +355,9 @@ export async function updatePriority(
       body: JSON.stringify(input),
     },
   )
-
   return response.data
 }
 
-// Archivos adjuntos.
 export interface TicketAttachment {
   id: number
   ticketId: number
@@ -396,84 +369,136 @@ export interface TicketAttachment {
   createdAt: string
 }
 
-export async function getAttachments(
-  ticketId: number,
-): Promise<TicketAttachment[]> {
-  const response =
-    await apiRequest<TicketAttachment[]>(
-      `/tickets/${ticketId}/attachments`,
-    )
-
+export async function getAttachments(ticketId: number): Promise<TicketAttachment[]> {
+  const response = await apiRequest<TicketAttachment[]>(`/tickets/${ticketId}/attachments`)
   return response.data
 }
 
-export async function uploadAttachment(
-  ticketId: number,
-  file: File,
-): Promise<TicketAttachment> {
+export async function uploadAttachment(ticketId: number, file: File): Promise<TicketAttachment> {
   const formData = new FormData()
   formData.append('file', file)
 
-  const base = (
-    import.meta.env.VITE_API_URL ||
-    'http://localhost:3000/api/v1'
-  ).replace(/\/$/, '')
-
+  const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
   const token = sessionStorage.getItem('omnidesk.token')
 
-  const response = await fetch(
-    `${base}/tickets/${ticketId}/attachments`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
-    },
-  )
+  const res = await fetch(`${base}/tickets/${ticketId}/attachments`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  })
 
-  if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({}))
-
-    throw new ApiError(
-      error.error?.message || 'Error al subir archivo',
-      response.status,
-    )
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}))
+    throw new ApiError(error.error?.message || 'Error al subir archivo', res.status)
   }
 
-  return (await response.json()).data
+  return (await res.json()).data
 }
 
-export async function getAttachmentUrl(
-  ticketId: number,
-  attachmentId: number,
-): Promise<string> {
-  const base = (
-    import.meta.env.VITE_API_URL ||
-    'http://localhost:3000/api/v1'
-  ).replace(/\/$/, '')
-
+export async function getAttachmentUrl(ticketId: number, attachmentId: number): Promise<string> {
+  const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
   const token = sessionStorage.getItem('omnidesk.token')
 
-  const response = await fetch(
-    `${base}/tickets/${ticketId}/attachments/${attachmentId}/content`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-  )
+  const res = await fetch(`${base}/tickets/${ticketId}/attachments/${attachmentId}/content`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
 
-  if (!response.ok) {
+  if (!res.ok) throw new ApiError('Error al descargar', res.status)
+
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+// Compatibilidad con NFR-006. FR-009 mantiene sus reglas de validación.
+// La reapertura no puede hacerse sin motivo: debe utilizarse reopenTicket().
+export async function changeTicketStatus(
+  id: number,
+  status: TicketStatus,
+): Promise<Ticket> {
+  const current = await getTicket(id)
+  if (current.status === 'Resolved' && status === 'In Progress') {
     throw new ApiError(
-      'Error al descargar',
-      response.status,
+      'Para reabrir un ticket debes indicar el motivo. Utiliza la acción de reapertura.',
+      400,
     )
   }
+  const response = await apiRequest<Ticket>(`/tickets/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, expectedVersion: current.version }),
+  })
+  return response.data
+}
 
-  const blob = await response.blob()
+// FR-009 exige resolutionVerification. No se debe inventar una verificación.
+// La vista debe capturarla y llamar a runTransition() con ResolutionInput.
+export async function resolveTicket(
+  _id: number,
+  _resolution: string,
+): Promise<Ticket> {
+  throw new ApiError(
+    'La resolución requiere describir la verificación. Actualiza el formulario para FR-009.',
+    400,
+  )
+}
 
-  return URL.createObjectURL(blob)
+// Mantener el selector anterior mientras se adapta la vista a prioridades enriquecidas.
+export async function updateTicketPriority(
+  id: number,
+  priorityId: number,
+): Promise<Ticket> {
+  const current = await getTicket(id)
+  return updatePriority(id, {
+    priorityId,
+    expectedVersion: current.version,
+  })
+}
+
+// =============================================================================
+// FR-009: Investigación, resolución y cierre
+// =============================================================================
+
+/** FR-009: lista las investigaciones de un ticket. */
+export async function listInvestigations(
+  ticketId: number,
+): Promise<TicketInvestigation[]> {
+  const response = await apiRequest<TicketInvestigation[]>(
+    `/tickets/${ticketId}/investigations`,
+  )
+  return response.data
+}
+
+/** FR-009: registra una actividad de investigación. */
+export async function addInvestigation(
+  ticketId: number,
+  input: InvestigationInput,
+): Promise<TicketInvestigation> {
+  const response = await apiRequest<TicketInvestigation>(
+    `/tickets/${ticketId}/investigations`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return response.data
+}
+
+/** FR-009: reabre un ticket resuelto (motivo obligatorio). */
+export async function reopenTicket(
+  ticketId: number,
+  input: ReopenInput,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(`/tickets/${ticketId}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return response.data
+}
+
+/**
+ * FR-011: lista artículos de conocimiento aprobados para usar como referencia
+ * en investigaciones y resoluciones. El backend ya filtra a 'approved' para
+ * usuarios sin permiso de publicación (Technician, Service Advisor, Employee).
+ */
+export async function listApprovedKnowledgeArticles(): Promise<KnowledgeArticleOption[]> {
+  const response = await apiRequest<KnowledgeArticleOption[]>(
+    '/knowledge/articles?limit=100',
+  )
+  return response.data
 }
