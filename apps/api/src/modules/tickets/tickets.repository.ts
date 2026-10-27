@@ -4,7 +4,8 @@ import { env } from '../../config/env';
 import { currentCorrelationId } from '../../shared/context/requestContext';
 import { recordAuditInMemory } from '../audit';
 import { ticketAuditFor } from './tickets.audit';
-import { Ticket, TicketHistoryEntry, TicketStatus } from './tickets.types';
+import { findUserById } from '../users';
+import { Ticket, TicketHistoryEntry, TicketInvestigation, TicketStatus } from './tickets.types';
 import { postgresTicketsRepository } from './tickets.postgres.repository';
 
 export interface TicketFilter {
@@ -19,12 +20,14 @@ export interface TicketFilter {
 // ──────────────────────────────────────────────────────────────────────────────
 const tickets: Ticket[] = [];
 const history: TicketHistoryEntry[] = [];
+const investigations: TicketInvestigation[] = [];
 let nextTicketId = 1;
 let nextHistoryId = 1;
+let nextInvestigationId = 1;
 
 const ticketsMemoryRepository = {
 
-    async listCategories() {
+  async listCategories() {
     return [
       { id: 1, name: 'Acceso' },
       { id: 2, name: 'Hardware' },
@@ -33,7 +36,7 @@ const ticketsMemoryRepository = {
     ];
   },
 
-    async listPriorities() {
+  async listPriorities() {
     return [
       { id: 1, name: 'Low', description: 'Baja - Problema con impacto mínimo, sin urgencia', sortOrder: 1 },
       { id: 2, name: 'Medium', description: 'Media - Problema con impacto moderado, atención normal', sortOrder: 2 },
@@ -60,8 +63,12 @@ const ticketsMemoryRepository = {
       assignedTechnicianId: null,
       dueDate: null,
       resolution: null,
-      storeLocation: data.storeLocation || null,     // NUEVO
-      motorcycleModel: data.motorcycleModel || null, // NUEVO
+      resolutionVerification: null,
+      rootCause: null,
+      resolutionObservations: null,
+      knowledgeArticleId: null,
+      storeLocation: data.storeLocation || null,
+      motorcycleModel: data.motorcycleModel || null,
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,
@@ -69,7 +76,15 @@ const ticketsMemoryRepository = {
       version: 1,
     };
     tickets.push(ticket);
-    history.push({ id: nextHistoryId++, ticketId: ticket.id, actorId: data.createdBy, action: 'created', to: 'Open', correlationId: currentCorrelationId(), createdAt: now });
+    history.push({
+      id: nextHistoryId++,
+      ticketId: ticket.id,
+      actorId: data.createdBy,
+      action: 'created',
+      to: 'Open',
+      correlationId: currentCorrelationId(),
+      createdAt: now,
+    });
     recordAuditInMemory({ action: 'ticket.created', entity: 'ticket', entityId: ticket.id, actorId: data.createdBy, metadata: { to: 'Open' } });
     return { ...ticket };
   },
@@ -136,6 +151,73 @@ const ticketsMemoryRepository = {
   async historyOf(ticketId: number): Promise<TicketHistoryEntry[]> {
     return history.filter((h) => h.ticketId === ticketId);
   },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // FR-009: investigaciones
+  // ──────────────────────────────────────────────────────────────────────────
+  async addInvestigation(
+    input: Omit<TicketInvestigation, 'id' | 'createdAt' | 'authorName' | 'knowledgeArticleTitle'>,
+  ): Promise<TicketInvestigation> {
+    const now = new Date().toISOString();
+    const investigation: TicketInvestigation = {
+      id: nextInvestigationId++,
+      ticketId: input.ticketId,
+      authorId: input.authorId,
+      activity: input.activity,
+      result: input.result,
+      knowledgeArticleId: input.knowledgeArticleId ?? null,
+      createdAt: now,
+    };
+    investigations.push(investigation);
+
+    // Evento en ticket_history (texto libre no se copia a audit_log: valuesInAudit=false).
+    history.push({
+      id: nextHistoryId++,
+      ticketId: input.ticketId,
+      actorId: input.authorId,
+      action: 'investigation_logged',
+      correlationId: currentCorrelationId(),
+      createdAt: now,
+    });
+
+    // NFR-009: el evento de auditoría se confirma junto con el cambio.
+    const audit = ticketAuditFor(input.ticketId, {
+      actorId: input.authorId,
+      action: 'investigation_logged',
+    });
+    if (audit) recordAuditInMemory(audit);
+
+    // Resuelve el nombre del autor y el título del artículo para devolverlos ya poblados.
+    const author = await findUserById(input.authorId);
+    let knowledgeArticleTitle: string | null = null;
+    if (input.knowledgeArticleId) {
+      // En memoria no tenemos el repositorio de knowledge cargado; el service ya validó
+      // la existencia y el estado 'approved' antes de llamar al repositorio. El título
+      // se resuelve en la respuesta del service usando el hook inyectado.
+      knowledgeArticleTitle = null;
+    }
+
+    return {
+      ...investigation,
+      authorName: author?.name ?? `Usuario #${input.authorId}`,
+      knowledgeArticleTitle,
+    };
+  },
+
+  async listInvestigations(ticketId: number): Promise<TicketInvestigation[]> {
+    const list = investigations.filter((i) => i.ticketId === ticketId);
+    // Resuelve nombres para que la respuesta sea consistente con la versión PostgreSQL.
+    return Promise.all(
+      list.map(async (inv) => {
+        const author = await findUserById(inv.authorId);
+        return {
+          ...inv,
+          authorName: author?.name ?? `Usuario #${inv.authorId}`,
+          knowledgeArticleTitle: inv.knowledgeArticleTitle ?? null,
+        };
+      }),
+    );
+  },
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -150,6 +232,8 @@ export const ticketsRepository = useMemory
 export function resetTicketsRepository(): void {
   tickets.length = 0;
   history.length = 0;
+  investigations.length = 0;
   nextTicketId = 1;
   nextHistoryId = 1;
+  nextInvestigationId = 1;
 }

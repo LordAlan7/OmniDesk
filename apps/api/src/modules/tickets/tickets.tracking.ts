@@ -29,16 +29,32 @@ export function canReadInternalHistory(ticket: Ticket, user: AuthUser) {
       (user.roles.includes('Technician') && ticket.assignedTechnicianId === user.id));
 }
 
+/**
+ * Vista pública del ticket para el solicitante (FR-018).
+ *
+ * Decisión 7 (FR-009): la resolución es INTERNA. El solicitante ve el estado
+ * ("Resolved" / "Closed") y las fechas (resolvedAt, closedAt), pero NO ve el
+ * texto de la resolución, ni la comprobación del resultado, ni la causa, ni las
+ * observaciones, ni la referencia a conocimiento. Esas son notas internas del
+ * equipo de soporte.
+ */
 export async function trackingTicket(ticket: Ticket) {
   const updates = publicUpdates(await ticketsRepository.historyOf(ticket.id));
   // Do not include updatedAt/version: those also change for private activity.
-  return { id: ticket.id, title: ticket.title, description: ticket.description,
-    status: ticket.status, createdAt: ticket.createdAt,
-    storeLocation: ticket.storeLocation, motorcycleModel: ticket.motorcycleModel,
-    resolution: ['Resolved', 'Closed'].includes(ticket.status) ? ticket.resolution : null,
-    resolvedAt: ticket.resolvedAt, closedAt: ticket.closedAt,
+  // FR-009 (decisión 7): no se incluye `resolution` ni los campos ampliados.
+  return {
+    id: ticket.id,
+    title: ticket.title,
+    description: ticket.description,
+    status: ticket.status,
+    createdAt: ticket.createdAt,
+    storeLocation: ticket.storeLocation,
+    motorcycleModel: ticket.motorcycleModel,
+    resolvedAt: ticket.resolvedAt,
+    closedAt: ticket.closedAt,
     lastVisibleUpdateAt: updates.length ? updates[updates.length - 1]!.createdAt : ticket.createdAt,
-    updates };
+    updates,
+  };
 }
 
 function requireRead(user: AuthUser) {

@@ -23,6 +23,11 @@ export interface Ticket {
   /** Calculado por el servidor (FR-008): plazo vencido en un ticket aún en seguimiento. */
   isOverdue?: boolean
   resolution: string | null
+  /** FR-009: comprobación del resultado (visible solo a staff, no al solicitante). */
+  resolutionVerification?: string | null
+  rootCause?: string | null
+  resolutionObservations?: string | null
+  knowledgeArticleId?: number | null
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
@@ -53,6 +58,53 @@ export interface AssignmentInput {
   technicianId: number
   expectedVersion: number
   reason?: string
+}
+
+export interface AvailableTransition {
+  to: TicketStatus
+  via: 'status' | 'resolution' | 'close'
+  requiresResolution?: boolean
+}
+
+/** FR-009: actividad de investigación registrada por un técnico. */
+export interface TicketInvestigation {
+  id: number
+  ticketId: number
+  authorId: number
+  authorName?: string | null
+  activity: string
+  result: string
+  knowledgeArticleId: number | null
+  knowledgeArticleTitle?: string | null
+  createdAt: string
+}
+
+/** FR-009: input para registrar una actividad de investigación. */
+export interface InvestigationInput {
+  activity: string
+  result: string
+  knowledgeArticleId?: number
+}
+
+/** FR-009: input para resolver un ticket (campos ampliados). */
+export interface ResolutionInput {
+  resolution: string
+  resolutionVerification: string
+  rootCause?: string
+  observations?: string
+  knowledgeArticleId?: number
+}
+
+/** FR-009: input para reabrir un ticket resuelto. */
+export interface ReopenInput {
+  reason: string
+  expectedVersion: number
+}
+
+/** FR-011: artículo de conocimiento aprobado, para el dropdown de referencias. */
+export interface KnowledgeArticleOption {
+  id: number
+  title: string
 }
 
 export function listTickets(
@@ -116,11 +168,6 @@ export async function getTicketHistory(
 
   return response.data
 }
-export interface AvailableTransition {
-  to: TicketStatus
-  via: 'status' | 'resolution' | 'close'
-  requiresResolution?: boolean
-}
 
 export async function getAvailableTransitions(
   ticketId: number,
@@ -132,30 +179,74 @@ export async function getAvailableTransitions(
   return response.data
 }
 
-/** Ejecuta una transición usando el endpoint que corresponde (estado, resolución o cierre). */
+/**
+ * Ejecuta una transición usando el endpoint que corresponde.
+ * FR-009: si la transición es Resolved → In Progress (reapertura), llama a /reopen
+ * con motivo obligatorio en lugar de /status.
+ */
 export async function runTransition(
   ticketId: number,
   transition: AvailableTransition,
-  input: { expectedVersion: number; resolution?: string },
+  input: {
+    expectedVersion: number
+    resolution?: ResolutionInput
+    reason?: string
+  },
+  currentStatus: TicketStatus,
 ): Promise<Ticket> {
-  const request =
-    transition.via === 'resolution'
-      ? { path: 'resolution', body: { resolution: input.resolution ?? '' } }
-      : transition.via === 'close'
-        ? { path: 'close', body: {} }
-        : {
-            path: 'status',
-            body: { status: transition.to, expectedVersion: input.expectedVersion },
-          }
+  // Detectar reapertura: Resolved → In Progress. El motivo es obligatorio.
+  const isReopen =
+    currentStatus === 'Resolved' &&
+    transition.to === 'In Progress' &&
+    transition.via === 'status'
 
-  const response = await apiRequest<Ticket>(
-    `/tickets/${ticketId}/${request.path}`,
-    {
-      method: transition.via === 'status' ? 'PATCH' : 'POST',
-      body: JSON.stringify(request.body),
-    },
-  )
+  if (isReopen) {
+    if (!input.reason || !input.reason.trim()) {
+      throw new ApiError('El motivo de reapertura es obligatorio.', 400)
+    }
+    const response = await apiRequest<Ticket>(
+      `/tickets/${ticketId}/reopen`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: input.reason.trim(),
+          expectedVersion: input.expectedVersion,
+        }),
+      },
+    )
+    return response.data
+  }
 
+  if (transition.via === 'resolution') {
+    if (!input.resolution) {
+      throw new ApiError('Falta la resolución.', 400)
+    }
+    const response = await apiRequest<Ticket>(
+      `/tickets/${ticketId}/resolution`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input.resolution),
+      },
+    )
+    return response.data
+  }
+
+  if (transition.via === 'close') {
+    const response = await apiRequest<Ticket>(`/tickets/${ticketId}/close`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    return response.data
+  }
+
+  // Transición de estado común (no reapertura).
+  const response = await apiRequest<Ticket>(`/tickets/${ticketId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: transition.to,
+      expectedVersion: input.expectedVersion,
+    }),
+  })
   return response.data
 }
 
@@ -196,13 +287,9 @@ export interface CreateTicketPayload {
   motorcycleModel: string
 }
 
-
 export const getCategories = () => apiRequest<Category[]>('/ticket-categories')
 
 export async function createTicket(payload: CreateTicketPayload) {
-  // Generamos una clave única para esta petición.
-  // Si el usuario hace doble clic, la segunda petición enviará la misma clave
-  // y el backend devolverá el ticket ya creado en lugar de hacer uno nuevo.
   const idempotencyKey = crypto.randomUUID()
 
   return apiRequest<Ticket>('/tickets', {
@@ -213,7 +300,6 @@ export async function createTicket(payload: CreateTicketPayload) {
     body: JSON.stringify(payload),
   })
 }
-
 
 export async function changeTicketCategory(id: number, categoryId: number): Promise<void> {
   await apiRequest(`/tickets/${id}/category`, {
@@ -313,4 +399,54 @@ export async function getAttachmentUrl(ticketId: number, attachmentId: number): 
   
   const blob = await res.blob()
   return URL.createObjectURL(blob)
+}
+
+// =============================================================================
+// FR-009: Investigación, resolución y cierre
+// =============================================================================
+
+/** FR-009: lista las investigaciones de un ticket. */
+export async function listInvestigations(
+  ticketId: number,
+): Promise<TicketInvestigation[]> {
+  const response = await apiRequest<TicketInvestigation[]>(
+    `/tickets/${ticketId}/investigations`,
+  )
+  return response.data
+}
+
+/** FR-009: registra una actividad de investigación. */
+export async function addInvestigation(
+  ticketId: number,
+  input: InvestigationInput,
+): Promise<TicketInvestigation> {
+  const response = await apiRequest<TicketInvestigation>(
+    `/tickets/${ticketId}/investigations`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return response.data
+}
+
+/** FR-009: reabre un ticket resuelto (motivo obligatorio). */
+export async function reopenTicket(
+  ticketId: number,
+  input: ReopenInput,
+): Promise<Ticket> {
+  const response = await apiRequest<Ticket>(`/tickets/${ticketId}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return response.data
+}
+
+/**
+ * FR-011: lista artículos de conocimiento aprobados para usar como referencia
+ * en investigaciones y resoluciones. El backend ya filtra a 'approved' para
+ * usuarios sin permiso de publicación (Technician, Service Advisor, Employee).
+ */
+export async function listApprovedKnowledgeArticles(): Promise<KnowledgeArticleOption[]> {
+  const response = await apiRequest<KnowledgeArticleOption[]>(
+    '/knowledge/articles?limit=100',
+  )
+  return response.data
 }

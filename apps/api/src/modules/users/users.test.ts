@@ -634,7 +634,10 @@ describe('users - FR-002', () => {
     const resolved = await request(app)
       .post(`/api/v1/tickets/${ticketId}/resolution`)
       .set(bearer(technicianToken))
-      .send({ resolution: 'Problema corregido y verificado.' });
+      .send({
+        resolution: 'Problema corregido y verificado.',
+        resolutionVerification: 'Confirmé con el usuario que ya puede acceder.',
+      });
 
     expect(resolved.status).toBe(200);
 

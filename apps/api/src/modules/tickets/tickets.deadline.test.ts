@@ -197,7 +197,10 @@ describe('FR-008 tracking endpoints', () => {
   });
 
   it('refuses deadline and progress changes on closed tickets', async () => {
-    await request(app).post(url('/resolution')).set(bearer(technician)).send({ resolution: 'Pieza reemplazada.' });
+    await request(app).post(url('/resolution')).set(bearer(technician)).send({
+      resolution: 'Pieza reemplazada.',
+      resolutionVerification: 'Confirmé con el usuario que el problema se resolvió.',
+    });
     await request(app).post(url('/close')).set(bearer(advisor)).send({});
 
     const { version, status } = await get();

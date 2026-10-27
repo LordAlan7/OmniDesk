@@ -149,7 +149,36 @@ export const statusSchema = z
 
 export const resolutionSchema = z
   .object({
-    resolution: z.string().trim().min(STRING_LIMITS.ticketResolution.min).max(STRING_LIMITS.ticketResolution.max),
+    // Solución aplicada (FR-009): descripción de lo que se hizo.
+    resolution: z
+      .string()
+      .trim()
+      .min(STRING_LIMITS.ticketResolution.min, MESSAGES.tooShort('La resolución', STRING_LIMITS.ticketResolution.min))
+      .max(STRING_LIMITS.ticketResolution.max, MESSAGES.tooLong('La resolución', STRING_LIMITS.ticketResolution.max)),
+    // FR-009: comprobación del resultado. Texto libre, obligatorio.
+    resolutionVerification: z
+      .string()
+      .trim()
+      .min(5, 'La comprobación del resultado es obligatoria (mínimo 5 caracteres).')
+      .max(5000, 'La comprobación del resultado no puede exceder 5000 caracteres.'),
+    // FR-009: causa identificada. Opcional — no se obliga al técnico a inventarla.
+    rootCause: z
+      .string()
+      .trim()
+      .max(2000, 'La causa identificada no puede exceder 2000 caracteres.')
+      .optional(),
+    // FR-009: observaciones complementarias. Opcionales.
+    observations: z
+      .string()
+      .trim()
+      .max(2000, 'Las observaciones no pueden exceder 2000 caracteres.')
+      .optional(),
+    // FR-009: referencia opcional a artículo de conocimiento aprobado (FR-011).
+    knowledgeArticleId: z
+      .number()
+      .int()
+      .positive(MESSAGES.positiveInt('knowledgeArticleId'))
+      .optional(),
   })
   .strict();
 
@@ -180,5 +209,42 @@ export const deadlineSchema = z
 export const progressUpdateSchema = z
   .object({
     note: z.string().trim().min(1, MESSAGES.required('La nota de avance')).max(1000),
+  })
+  .strict();
+
+
+  /** FR-009: registro de una actividad de investigación. */
+export const investigationSchema = z
+  .object({
+    activity: z
+      .string()
+      .trim()
+      .min(1, MESSAGES.required('La actividad o prueba realizada'))
+      .max(5000, 'La actividad no puede exceder 5000 caracteres.'),
+    result: z
+      .string()
+      .trim()
+      .min(1, MESSAGES.required('El resultado observado'))
+      .max(5000, 'El resultado no puede exceder 5000 caracteres.'),
+    knowledgeArticleId: z
+      .number()
+      .int()
+      .positive(MESSAGES.positiveInt('knowledgeArticleId'))
+      .optional(),
+  })
+  .strict();
+
+/** FR-009: reapertura de un ticket resuelto. El motivo es obligatorio. */
+export const reopenSchema = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .min(1, MESSAGES.required('El motivo de reapertura'))
+      .max(500, 'El motivo de reapertura no puede exceder 500 caracteres.'),
+    expectedVersion: z
+      .number()
+      .int()
+      .positive(MESSAGES.positiveInt('expectedVersion')),
   })
   .strict();

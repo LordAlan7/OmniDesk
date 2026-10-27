@@ -67,3 +67,73 @@ export async function changeStatus(id: number, status: KnowledgeStatus, version:
   recordAudit({ action: `knowledge.${status}`, entity: 'article', entityId: id, actorId: user.id });
   return saved;
 }
+
+/**
+ * FR-009: valida que un artículo de conocimiento exista y esté aprobado, para
+ * usarlo como referencia al documentar una investigación o una resolución.
+ *
+ * Reglas:
+ * - El artículo debe existir. Si no existe → lanza notFound.
+ * - El artículo debe estar en estado 'approved'. Si está 'draft' o 'retired' →
+ *   lanza validation (no se puede usar un borrador ni un retirado como referencia).
+ * - La visibilidad del artículo al usuario que lo referencia se delega al flujo
+ *   normal de FR-011 (getArticle); aquí solo validamos la existencia y el estado.
+ *
+ * Devuelve el artículo aprobado (para que el caller pueda, opcionalmente, copiar
+ * su título en la respuesta). Nunca copia el contenido (solution) — la referencia
+ * es por id, no por texto (FR-009: "Guardar la referencia al artículo utilizado
+ * sin copiar innecesariamente su contenido").
+ */
+export async function findApprovedArticleForReference(
+  articleId: number,
+  user: AuthUser,
+): Promise<KnowledgeArticle> {
+  const article = await repo.findById(articleId);
+
+  if (!article) {
+    throw Errors.notFound('Knowledge article');
+  }
+
+  if (article.status !== 'approved') {
+    throw Errors.validation([
+      {
+        field: 'knowledgeArticleId',
+        message:
+          'Solo se pueden referenciar artículos de conocimiento aprobados.',
+      },
+    ]);
+  }
+
+  // FR-011 ya decide quién puede ver borradores/retirados; aquí solo garantizamos
+  // que el usuario tenga al menos permiso de lectura de conocimiento.
+  if (!can(user, PERMISSIONS.KNOWLEDGE_READ)) {
+    throw Errors.forbidden();
+  }
+
+  return article;
+}
+
+/**
+ * FR-009: consulta un artículo aprobado por id, sin verificar permisos del
+ * usuario. La usa el módulo tickets (vía inyección en app.ts) para validar
+ * referencias a artículos de conocimiento al documentar investigaciones y
+ * resoluciones.
+ *
+ * Reglas:
+ * - Solo devuelve el artículo si existe y está en estado 'approved'.
+ * - Si no existe o no está aprobado, devuelve null (el caller decide qué hacer).
+ * - No devuelve el contenido (solution), solo { id, title }: la referencia es
+ *   por id, no por texto (FR-009: "sin copiar innecesariamente su contenido").
+ *
+ * Esta función es intencionalmente pública y sin usuario: los artículos
+ * aprobados son legibles por cualquier usuario autenticado (FR-011), por lo
+ * que validar la referencia no requiere verificar permisos del técnico que
+ * la usa.
+ */
+export async function findApprovedArticleById(
+  articleId: number,
+): Promise<{ id: number; title: string } | null> {
+  const article = await repo.findById(articleId);
+  if (!article || article.status !== 'approved') return null;
+  return { id: article.id, title: article.title };
+}
