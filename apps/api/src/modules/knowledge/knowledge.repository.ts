@@ -10,6 +10,9 @@ const memoryKnowledgeRepository = {
     const article: KnowledgeArticle = {
       id: nextId++,
       ...data,
+      isRecurringProblem: data.isRecurringProblem ?? false,
+      symptoms: data.symptoms ?? null,
+      verification: data.verification ?? null,
       status: 'draft',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -25,6 +28,9 @@ const memoryKnowledgeRepository = {
     let filtered = articles;
     if (filter.status) filtered = filtered.filter((a) => a.status === filter.status);
     if (filter.categoryId) filtered = filtered.filter((a) => a.categoryId === filter.categoryId);
+    if (filter.isRecurringProblem !== undefined) {
+      filtered = filtered.filter((a) => a.isRecurringProblem === filter.isRecurringProblem);
+    }
     if (filter.text) {
       const regex = new RegExp(filter.text, 'i');
       filtered = filtered.filter((a) => regex.test(a.title) || regex.test(a.problemDescription) || regex.test(a.solution));

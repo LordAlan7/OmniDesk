@@ -7,6 +7,8 @@ import { ticketAuditFor } from './tickets.audit';
 import { findUserById } from '../users';
 import { Ticket, TicketHistoryEntry, TicketInvestigation, TicketStatus } from './tickets.types';
 import { postgresTicketsRepository } from './tickets.postgres.repository';
+import type { RecurringProblemLink } from './tickets.types'; // Asegúrate de importarlo
+const recurringLinks: RecurringProblemLink[] = [];
 
 export interface TicketFilter {
   visibleTo: number | null;
@@ -150,6 +152,27 @@ const ticketsMemoryRepository = {
 
   async historyOf(ticketId: number): Promise<TicketHistoryEntry[]> {
     return history.filter((h) => h.ticketId === ticketId);
+  },
+
+    // ──────────────────────────────────────────────────────────────────────────────
+  // FR-019: Problemas recurrentes (memoria)
+  // ──────────────────────────────────────────────────────────────────────────────
+  async linkRecurringProblem(ticketId: number, articleId: number, linkedBy: number): Promise<void> {
+    if (!recurringLinks.some((l) => l.ticketId === ticketId && l.articleId === articleId)) {
+      recurringLinks.push({ ticketId, articleId, linkedBy, linkedAt: new Date().toISOString() });
+    } else {
+      throw Errors.conflict('Este problema ya está vinculado a este ticket.');
+    }
+  },
+
+  async unlinkRecurringProblem(ticketId: number, articleId: number): Promise<void> {
+    const index = recurringLinks.findIndex((l) => l.ticketId === ticketId && l.articleId === articleId);
+    if (index === -1) throw Errors.notFound('Vínculo de problema recurrente');
+    recurringLinks.splice(index, 1);
+  },
+
+  async getRecurringProblems(ticketId: number): Promise<number[]> {
+    return recurringLinks.filter((l) => l.ticketId === ticketId).map((l) => l.articleId);
   },
 
   // ──────────────────────────────────────────────────────────────────────────

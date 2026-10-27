@@ -71,6 +71,13 @@ export interface Priority {
   sortOrder: number;
 }
 
+export interface RecurringProblemLink {
+  ticketId: number;
+  articleId: number;
+  linkedBy: number;
+  linkedAt: string;
+}
+
 /** FR-009: actividad de investigación registrada por un técnico sobre un ticket. */
 export interface TicketInvestigation {
   id: number;

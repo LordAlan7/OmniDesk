@@ -208,12 +208,15 @@ export const deadlineSchema = z
 
 export const progressUpdateSchema = z
   .object({
-    note: z.string().trim().min(1, MESSAGES.required('La nota de avance')).max(1000),
+    note: z
+      .string()
+      .trim()
+      .min(1, MESSAGES.required('La nota de avance'))
+      .max(1000),
   })
   .strict();
 
-
-  /** FR-009: registro de una actividad de investigación. */
+/** FR-009: registro de una actividad de investigación. */
 export const investigationSchema = z
   .object({
     activity: z
@@ -246,5 +249,11 @@ export const reopenSchema = z
       .number()
       .int()
       .positive(MESSAGES.positiveInt('expectedVersion')),
+  })
+  .strict();
+
+export const linkRecurringProblemSchema = z
+  .object({
+    articleId: z.number().int().positive(),
   })
   .strict();

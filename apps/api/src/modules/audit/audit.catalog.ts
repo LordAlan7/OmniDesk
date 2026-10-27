@@ -65,6 +65,10 @@ export const AUDIT_EVENTS = {
     historyAction: 'reopened',
   }),
   'ticket.attachment_uploaded': event('ticket', 'files', 'Archivo adjunto cargado.'),
+  
+  // NUEVAS: FR-019 (Problemas recurrentes)
+  'ticket.recurring_problem_linked': event('ticket', 'tickets', 'Problema recurrente vinculado al ticket.'),
+  'ticket.recurring_problem_unlinked': event('ticket', 'tickets', 'Problema recurrente desvinculado del ticket.'),
 
   // Conocimiento
   'knowledge.created': event('article', 'knowledge', 'Artículo creado.'),
