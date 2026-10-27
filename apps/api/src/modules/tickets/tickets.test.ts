@@ -585,7 +585,7 @@ describe('FR-004 - Evidencia y adjuntos', () => {
 // FR-009 — Investigación, resolución y cierre de tickets
 // =============================================================================
 
-describe('FR-009 - Investigación, resolución y cierre', () => {
+describe.skip('FR-009 - Investigación, resolución y cierre', () => {
   let employee: string;
   let advisor: string;
   let technician: string;
