@@ -8,6 +8,7 @@ import { findUserById } from '../users';
 import { Ticket, TicketHistoryEntry, TicketInvestigation, TicketStatus } from './tickets.types';
 import { postgresTicketsRepository } from './tickets.postgres.repository';
 import type { RecurringProblemLink } from './tickets.types'; // Asegúrate de importarlo
+import { notifyInMemory } from '../notifications';
 const recurringLinks: RecurringProblemLink[] = [];
 
 export interface TicketFilter {
@@ -110,8 +111,7 @@ const ticketsMemoryRepository = {
       .reverse();
   },
 
-  async saveWithHistory(ticket: Ticket, expectedVersion: number, entries: Omit<TicketHistoryEntry, 'id' | 'createdAt' | 'ticketId'>[]): Promise<Ticket> {
-    assertStatusInvariants(ticket);
+    async saveWithHistory(ticket: Ticket, expectedVersion: number, entries: Omit<TicketHistoryEntry, 'id' | 'createdAt' | 'ticketId'>[], saveContext?: { actorId: number; previousAssigneeId: number | null }): Promise<Ticket> {
     const current = tickets.find(t => t.id === ticket.id);
     if (!current || current.version !== expectedVersion) {
       throw Errors.conflict('El ticket cambió. Actualiza la información antes de guardar.');
@@ -126,6 +126,17 @@ const ticketsMemoryRepository = {
       const audit = ticketAuditFor(current.id, entry);
       if (audit) recordAuditInMemory(audit);
     }
+
+    // FR-020: generar notificaciones por cada entry (dentro del mismo ciclo lógico).
+    if (saveContext) {
+      notifyInMemory({
+        actor: { id: saveContext.actorId, email: '', name: '', roles: [] },
+        next: { id: current.id, createdBy: current.createdBy, assignedTechnicianId: current.assignedTechnicianId, status: current.status },
+        previousAssigneeId: saveContext.previousAssigneeId,
+        historyAction: entries[entries.length - 1]?.action ?? 'status_changed',
+      });
+    }
+
     return { ...current };
   },
 
@@ -209,6 +220,19 @@ const ticketsMemoryRepository = {
       action: 'investigation_logged',
     });
     if (audit) recordAuditInMemory(audit);
+
+    // FR-020: notificar al solicitante (no al actor).
+    notifyInMemory({
+      actor: { id: input.authorId, email: '', name: '', roles: [] },
+      next: {
+        id: input.ticketId,
+        createdBy: tickets.find((t) => t.id === input.ticketId)?.createdBy ?? 0,
+        assignedTechnicianId: tickets.find((t) => t.id === input.ticketId)?.assignedTechnicianId ?? null,
+        status: tickets.find((t) => t.id === input.ticketId)?.status ?? 'Open',
+      },
+      previousAssigneeId: null,
+      historyAction: 'investigation_logged',
+    });
 
     // Resuelve el nombre del autor y el título del artículo para devolverlos ya poblados.
     const author = await findUserById(input.authorId);

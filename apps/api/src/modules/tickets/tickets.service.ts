@@ -20,7 +20,7 @@ import {
 } from '../../shared/authorization';
 
 
-import { notify } from '../notifications';
+//import { notify } from '../notifications';
 
 import {
 
@@ -123,9 +123,11 @@ async function saveWithHistory(
 
   entries: HistoryInput[],
 
+  saveContext?: { actorId: number; previousAssigneeId: number | null },
+
 ): Promise<Ticket> {
 
-  const saved = await ticketsRepository.saveWithHistory(ticket, ticket.version, entries);
+  const saved = await ticketsRepository.saveWithHistory(ticket, ticket.version, entries, saveContext);
 
   return withTechnicianName(saved);
 
@@ -187,25 +189,18 @@ function transition(
 
 }
 
+// FR-020: las notificaciones se generan ahora en el repositorio dentro de
+// saveWithHistory, usando el catálogo. Esta función se mantiene vacía para
+// no romper los callers existentes (se puede eliminar cuando se migren todos).
 function publishStatus(
 
-  ticket: Ticket,
+  _ticket: Ticket,
 
-  entry: HistoryInput,
+  _entry: HistoryInput,
 
 ): void {
 
-  notify(
-
-    ticket.createdBy,
-
-    'ticket.status_changed',
-
-    `Your ticket #${ticket.id} is now "${ticket.status}".`,
-
-    { entity: 'ticket', id: ticket.id },
-
-  );
+  // No-op: las notificaciones las maneja el repositorio vía notifyInTransaction/notifyInMemory.
 
 }
 
@@ -474,6 +469,8 @@ export async function assignTechnician(
 
       }
 
+      const previousAssigneeId = ticket.assignedTechnicianId;
+
       const from = ticket.assignedTechnicianId;
 
       const entries: HistoryInput[] = [];
@@ -504,7 +501,10 @@ export async function assignTechnician(
 
       });
 
-      const saved = await saveWithHistory(ticket, entries);
+      const saved = await saveWithHistory(ticket, entries, {
+        actorId: user.id,
+        previousAssigneeId,
+      });
 
       for (const entry of entries) {
 
@@ -517,18 +517,7 @@ export async function assignTechnician(
       }
 
 
-      notify(
-
-        technicianId,
-
-        'ticket.assigned',
-
-        `Ticket #${id} was assigned to you.`,
-
-        { entity: 'ticket', id },
-
-      );
-
+      // FR-020: la notificación la maneja el repositorio vía notifyInMemory/notifyInTransaction.
       return saved;
 
     },
@@ -593,7 +582,10 @@ export async function changeStatus(
 
   const entry = transition(ticket, to, user);
 
-  const saved = await saveWithHistory(ticket, [entry]);
+  const saved = await saveWithHistory(ticket, [entry], {
+    actorId: user.id,
+    previousAssigneeId: ticket.assignedTechnicianId,
+  });
 
   publishStatus(saved, entry);
 
@@ -660,7 +652,10 @@ export async function resolveTicket(
 
   ticket.resolvedAt = new Date().toISOString();
 
-  const saved = await saveWithHistory(ticket, [entry]);
+  const saved = await saveWithHistory(ticket, [entry], {
+    actorId: user.id,
+    previousAssigneeId: ticket.assignedTechnicianId,
+  });
 
   publishStatus(saved, entry);
 
@@ -857,20 +852,7 @@ export async function addInvestigation(
 
   });
 
-  // Notificación al solicitante (FR-020): la investigación es interna, pero el
-  // solicitante sí debe saber que hay actividad en su ticket.
-  notify(
-
-    ticket.createdBy,
-
-    'ticket.investigation_logged',
-
-    `Se registró una actividad de investigación en tu ticket #${id}.`,
-
-    { entity: 'ticket', id },
-
-  );
-
+  // FR-020: la notificación la maneja el repositorio vía notifyInMemory/notifyInTransaction.
   return investigation;
 
 }

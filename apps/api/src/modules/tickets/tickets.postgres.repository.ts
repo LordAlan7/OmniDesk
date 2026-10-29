@@ -5,6 +5,8 @@ import { currentCorrelationId } from '../../shared/context/requestContext';
 import { recordAuditInTransaction } from '../audit';
 import { ticketAuditFor } from './tickets.audit';
 import type { TicketFilter } from './tickets.repository';
+import { notifyInTransaction } from '../notifications';
+import type { SaveContext } from './tickets.types';
 import type {
   Ticket,
   TicketHistoryEntry,
@@ -206,6 +208,7 @@ export const postgresTicketsRepository = {
     ticket: Ticket,
     expectedVersion: number,
     entries: HistoryInput[],
+    saveContext?: SaveContext,
   ): Promise<Ticket> {
     assertStatusInvariants(ticket);
     const client = await getPool().connect();
@@ -291,6 +294,21 @@ export const postgresTicketsRepository = {
         // NFR-009: el evento de auditoría se confirma (o revierte) junto con el cambio.
         const audit = ticketAuditFor(ticket.id, entry);
         if (audit) await recordAuditInTransaction(client, audit);
+
+        // FR-020: notificación dentro de la misma transacción (si hay contexto).
+        if (saveContext) {
+          await notifyInTransaction(client, {
+            actor: { id: saveContext.actorId, email: '', name: '', roles: [] },
+            next: {
+              id: ticket.id,
+              createdBy: ticket.createdBy,
+              assignedTechnicianId: ticket.assignedTechnicianId,
+              status: ticket.status,
+            },
+            previousAssigneeId: saveContext.previousAssigneeId,
+            historyAction: entry.action,
+          });
+        }
       }
 
       await client.query('COMMIT');
@@ -531,6 +549,19 @@ export const postgresTicketsRepository = {
         action: 'investigation_logged',
       });
       if (audit) await recordAuditInTransaction(client, audit);
+
+      // FR-020: notificar al solicitante (no al actor).
+      await notifyInTransaction(client, {
+        actor: { id: input.authorId, email: '', name: '', roles: [] },
+        next: {
+          id: input.ticketId,
+          createdBy: (await client.query('SELECT created_by FROM tickets WHERE id = $1', [input.ticketId])).rows[0]?.created_by ?? 0,
+          assignedTechnicianId: null,
+          status: 'In Progress',
+        },
+        previousAssigneeId: null,
+        historyAction: 'investigation_logged',
+      });
 
       await client.query('COMMIT');
 

@@ -95,3 +95,11 @@ export interface TicketInvestigation {
   knowledgeArticleTitle?: string | null;
   createdAt: string;
 }
+
+/** FR-020: contexto para generar notificaciones dentro de saveWithHistory. */
+export interface SaveContext {
+  /** Usuario que ejecutó la acción (se excluye de notificaciones — decisión 1). */
+  actorId: number;
+  /** Asignado anterior (para excluirlo en reasignación — decisión 2). */
+  previousAssigneeId: number | null;
+}

@@ -136,6 +136,14 @@ const router = createRouter({
       },
     },
     {
+      path: '/notifications',
+      name: 'notifications',
+      component: () => import('@/views/NotificationsView.vue'),
+      meta: {
+        permissions: ['notifications:read:own'],
+      },
+    },
+    {
       path: '/access-denied',
       name: 'access-denied',
       component: () =>

@@ -19,7 +19,10 @@ import { authRouter } from './modules/auth';
 import { filesRouter } from './modules/files';
 import { knowledgeRouter, findApprovedArticleById } from './modules/knowledge';
 import { getArticle } from './modules/knowledge/knowledge.service';
-import { notificationsRouter } from './modules/notifications';
+import {
+  notificationsRouter,
+  configureAccessibleTicketIdsChecker,
+} from './modules/notifications';
 import { reportsRouter } from './modules/reports';
 import {
   ticketsRouter,
@@ -32,6 +35,7 @@ import {
   configurePendingTicketsChecker,
 } from './modules/users';
 import { ticketCategoriesRouter } from './modules/tickets/tickets.categories.routes';
+import { accessibleTicketIdsForUser } from './modules/tickets';
 
 
 
@@ -48,6 +52,11 @@ export function createApp() {
   configureArticleReferenceChecker(
     findApprovedArticleById
   );
+
+  // FR-020: el módulo notifications revalida acceso a tickets al listar/contar
+  // notificaciones (decisión 3). Se inyecta el checker desde tickets para
+  // romper el ciclo notifications → tickets → knowledge → files → tickets.
+  configureAccessibleTicketIdsChecker(accessibleTicketIdsForUser);
 
   const app = express();
 
