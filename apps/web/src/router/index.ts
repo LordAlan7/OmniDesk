@@ -33,6 +33,17 @@ const router = createRouter({
       component: () =>
         import('@/views/DashboardView.vue'),
     },
+
+{
+  path: '/support-dashboard',
+  name: 'support-dashboard',
+  component: () =>
+    import('@/views/SupportDashboardView.vue'),
+  meta: {
+    allPermissions: ['reports:read:global'],
+  },
+},
+
     {
       path: '/my-tickets',
       name: 'my-tickets',
