@@ -53,6 +53,31 @@ import {
   TicketStatus,
 
 } from './tickets.types';
+
+// NFR-008 (Escalabilidad): estado in-process por instancia.
+//
+// `creations` es un cache de idempotencia para la creación de tickets. Si un
+// cliente envía dos veces la misma petición con la misma `Idempotency-Key`, la
+// segunda recibe el ticket ya creado en lugar de duplicarlo.
+//
+// ⚠️ Limitación de multi-instancia: este Map vive en la memoria de CADA proceso.
+// Si la misma petición llega a dos instancias distintas (balanceador round-robin),
+// cada una crea su propio ticket porque no comparten el cache.
+//
+// Mitigación actual (aceptable para single-instance y volúmenes bajos):
+//   - Con < 50 tickets/semana, la probabilidad de que un doble-envío llegue a
+//     instancias distintas es muy baja.
+//   - El cliente genera el `Idempotency-Key` con `crypto.randomUUID()`, así que
+//     cada petición nueva tiene una clave distinta. Solo los reintentos exactos
+//     (mismo key) se benefician del cache.
+//
+// Ruta de migración a multi-instancia (cuando se necesite):
+//   - Añadir una tabla `idempotency_keys` en PostgreSQL que guarde
+//     (key, ticket_id, created_at). Al recibir una petición, hacer INSERT con
+//     ON CONFLICT DO NOTHING y devolver el ticket_id existente si ya estaba.
+//   - Alternativa: Redis con TTL (p. ej. 24h) para no llenar la BD.
+//
+// Ver docs/NFR-008-Scalability.md para el procedimiento de ampliación.
 const creations = new Map<string, { fingerprint: string; result: Promise<Ticket> }>();
 
 export async function listCategories() {
