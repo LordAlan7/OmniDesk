@@ -37,6 +37,15 @@ const opciones = computed(() =>
       ruta: '/tickets',
       visible: canOpenTickets.value,
     },
+
+{
+  titulo: 'Panel de soporte',
+  descripcion:
+    'Consulta estadísticas, estados y carga de trabajo de los técnicos.',
+  ruta: '/support-dashboard',
+  visible: session.can('reports:read:global'),
+},
+
     {
       titulo: 'Gestión de usuarios',
       descripcion: 'Consulta las cuentas registradas.',
