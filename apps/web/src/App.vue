@@ -160,8 +160,9 @@ onUnmounted(() => {
             Tickets
           </RouterLink>
 
+          <!-- Administración de usuarios -->
           <RouterLink
-            v-if="session.can('users:manage')"
+            v-if="session.can('users:create')"
             :to="{ name: 'admin-users' }"
             data-testid="nav-admin"
             @click="closeMenu"
@@ -169,10 +170,11 @@ onUnmounted(() => {
             Usuarios
           </RouterLink>
 
+          <!-- Consulta de usuarios sin gestión -->
           <RouterLink
             v-if="
               session.can('users:read:list') &&
-              !session.can('users:manage')
+              !session.can('users:create')
             "
             :to="{ name: 'users' }"
             @click="closeMenu"

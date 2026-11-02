@@ -37,8 +37,34 @@ describe('FR-003 - Creación de Tickets de Soporte', () => {
     cy.contains('#TK-').should('be.visible');
   });
 
-  it('verifica que el ticket aparezca en el listado general', () => {
-    cy.visit('/tickets');
-    cy.contains(uniqueTitle).should('be.visible');
-  });
+
+
+
+it('verifica que el ticket aparezca en Mis tickets', () => {
+  // Simulamos una pantalla de escritorio
+  cy.viewport(1366, 768);
+
+  // Esperamos la respuesta del backend
+  cy.intercept('GET', '**/api/v1/me/tickets*')
+    .as('misTickets');
+
+  cy.visit('/my-tickets');
+
+  cy.wait('@misTickets')
+    .its('response.statusCode')
+    .should('eq', 200);
+
+  // Verificamos la tabla de escritorio
+  cy.get('.table-wrap')
+    .should('be.visible');
+
+  // Buscamos el título dentro de la tabla visible
+  cy.get('.table-wrap')
+    .contains(uniqueTitle)
+    .scrollIntoView()
+    .should('be.visible');
+});
+
+
+
 });

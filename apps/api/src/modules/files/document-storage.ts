@@ -3,7 +3,9 @@ import type { DatabaseClient as PoolClient } from '../../shared/db/types';
 import { PDFDocument, PDFName, PDFDict, PDFArray, PDFStream } from 'pdf-lib';
 import { AppError, Errors } from '../../shared/errors';
 
-export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+import { MAX_DOCUMENT_BYTES } from '../../shared/constants/document-limits';
+
+export { MAX_DOCUMENT_BYTES };
 
 /** Defense in depth; download only. This is not an antivirus engine. */
 export async function validateDocumentPdf(file?: Express.Multer.File): Promise<void> {

@@ -3,6 +3,7 @@ import {
   createRouter,
   createWebHistory,
 } from 'vue-router'
+
 import { useSessionStore } from '@/stores/session'
 
 declare module 'vue-router' {
@@ -33,17 +34,15 @@ const router = createRouter({
       component: () =>
         import('@/views/DashboardView.vue'),
     },
-
-{
-  path: '/support-dashboard',
-  name: 'support-dashboard',
-  component: () =>
-    import('@/views/SupportDashboardView.vue'),
-  meta: {
-    allPermissions: ['reports:read:global'],
-  },
-},
-
+    {
+      path: '/support-dashboard',
+      name: 'support-dashboard',
+      component: () =>
+        import('@/views/SupportDashboardView.vue'),
+      meta: {
+        allPermissions: ['reports:read:global'],
+      },
+    },
     {
       path: '/my-tickets',
       name: 'my-tickets',
@@ -98,19 +97,31 @@ const router = createRouter({
         ticketWorkspace: true,
       },
     },
-    {
-      path: '/admin/users',
-      name: 'admin-users',
-      redirect: { name: 'users' },
-      meta: {
-        permissions: ['users:manage'],
-      },
-    },
+
+    // Acceso de administración de usuarios.
+
+{
+  path: '/admin/users',
+  name: 'admin-users',
+  component: () =>
+    import('@/views/UsersView.vue'),
+  meta: {
+    allPermissions: [
+      'users:create',
+      'users:read:list',
+    ],
+  },
+},
+
+
     {
       path: '/audit',
       name: 'audit',
-      component: () => import('@/views/AuditView.vue'),
-      meta: { permissions: ['audit:read'] },
+      component: () =>
+        import('@/views/AuditView.vue'),
+      meta: {
+        permissions: ['audit:read'],
+      },
     },
     {
       path: '/users',
@@ -149,7 +160,8 @@ const router = createRouter({
     {
       path: '/notifications',
       name: 'notifications',
-      component: () => import('@/views/NotificationsView.vue'),
+      component: () =>
+        import('@/views/NotificationsView.vue'),
       meta: {
         permissions: ['notifications:read:own'],
       },
@@ -205,6 +217,10 @@ router.beforeEach(async (to) => {
       },
     }
   }
+
+  // Proteger el acceso mediante /admin/users.
+  // Los guards del destino no aplican automáticamente
+  // los permisos declarados en la ruta que redirige.
 
   // Rutas que aceptan cualquiera de los
   // permisos declarados.
