@@ -4,7 +4,7 @@ import type { RequestHandler } from 'express';
 import { AppError } from '../../shared/errors';
 import { authenticate } from '../../shared/security/guards';
 import { PERMISSIONS, requirePermission } from '../../shared/authorization';
-import { MAX_DOCUMENT_BYTES } from '../files';
+import { MAX_DOCUMENT_BYTES } from '../../shared/constants/document-limits';
 import * as controller from './documents.controller';
 
 export const documentsRouter = Router();
