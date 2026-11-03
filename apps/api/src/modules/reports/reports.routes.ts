@@ -1,7 +1,7 @@
-
 import { Router } from 'express';
 import { ok } from '../../shared/http';
-
+import { listReportDefinitions, generateReport } from './reports.service';
+import { generateReportSchema } from './reports.schemas';
 import {
   authenticate,
   currentUser,
@@ -29,10 +29,7 @@ reportsRouter.get(
   authenticate,
   async (req, res, next) => {
     try {
-      const result = await getOverviewForUser(
-        currentUser(req),
-      );
-
+      const result = await getOverviewForUser(currentUser(req));
       ok(res, result);
     } catch (error) {
       next(error);
@@ -48,15 +45,8 @@ reportsRouter.get(
   authenticate,
   async (req, res, next) => {
     try {
-      const filters = reportTicketFiltersSchema.parse(
-        req.query,
-      );
-
-      const result = await getReportTicketsForUser(
-        currentUser(req),
-        filters,
-      );
-
+      const filters = reportTicketFiltersSchema.parse(req.query);
+      const result = await getReportTicketsForUser(currentUser(req), filters);
       ok(res, result);
     } catch (error) {
       next(error);
@@ -72,16 +62,12 @@ reportsRouter.get(
   authenticate,
   async (req, res, next) => {
     try {
-      const result = await getWorkloadForUser(
-        currentUser(req),
-      );
-
+      const result = await getWorkloadForUser(currentUser(req));
       ok(res, result);
     } catch (error) {
       next(error);
     }
   },
-
 );
 
 /**
@@ -92,15 +78,41 @@ reportsRouter.get(
   authenticate,
   async (req, res, next) => {
     try {
-      const filters = reportActivityFiltersSchema.parse(
-        req.query,
-      );
+      const filters = reportActivityFiltersSchema.parse(req.query);
+      const result = await getActivityForUser(currentUser(req), filters);
+      ok(res, result);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
-      const result = await getActivityForUser(
-        currentUser(req),
-        filters,
-      );
+/**
+ * FR-017: listar informes disponibles.
+ */
+reportsRouter.get(
+  '/reports',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const reports = listReportDefinitions(currentUser(req));
+      ok(res, reports);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
+/**
+ * FR-017: generar un informe específico con filtros.
+ */
+reportsRouter.post(
+  '/reports/generate',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const { type, filters } = generateReportSchema.parse(req.body);
+      const result = await generateReport(currentUser(req), type, filters);
       ok(res, result);
     } catch (error) {
       next(error);
