@@ -17,7 +17,7 @@
  *
  * Devuelve `number[]` (IDs de destinatarios). El service deduplica y filtra.
  */
-import type { Ticket } from '../tickets/tickets.types';
+import type { Ticket } from '../tickets';
 import type { AuthUser } from '../../shared/types';
 
 export interface NotificationContext {

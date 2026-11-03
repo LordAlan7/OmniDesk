@@ -36,7 +36,7 @@ import {
 } from './modules/users';
 import { ticketCategoriesRouter } from './modules/tickets/tickets.categories.routes';
 import { accessibleTicketIdsForUser } from './modules/tickets';
-
+import { healthCheck } from './shared/middleware/health';
 
 
 export function createApp() {
@@ -46,9 +46,9 @@ export function createApp() {
     hasPendingTicketsForTechnician,
   );
 
-// FR-009: el módulo tickets valida referencias a artículos de conocimiento (FR-011)
-// mediante inyección de dependencia. Así se rompe el ciclo
-// tickets → knowledge → files → tickets, respetando architecture.test.ts.
+  // FR-009: el módulo tickets valida referencias a artículos de conocimiento (FR-011)
+  // mediante inyección de dependencia. Así se rompe el ciclo
+  // tickets → knowledge → files → tickets, respetando architecture.test.ts.
   configureArticleReferenceChecker(
     findApprovedArticleById
   );
@@ -75,14 +75,8 @@ export function createApp() {
 
   const api = express.Router();
 
-  api.get('/health', (_req, res) => {
-    res.json({
-      data: {
-        status: 'ok',
-        service: 'omnidesk-api',
-      },
-    });
-  });
+// NFR-004: Health check con verificación de base de datos
+  api.get('/health', healthCheck);
 
   api.use(authRouter);
   api.use(usersRouter);
@@ -101,4 +95,3 @@ export function createApp() {
 
   return app;
 }
-

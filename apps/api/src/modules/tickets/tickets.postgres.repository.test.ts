@@ -10,14 +10,22 @@ const row = {
   assigned_technician_id: 2, store_location: 'Centro', motorcycle_model: 'FT150',
   due_date: null, resolution: null, created_at: new Date(), updated_at: new Date(),
   resolved_at: null, closed_at: null, version: 2,
+  // NUEVOS: FR-009 (Alexis)
+  resolution_verification: null, root_cause: null,
+  resolution_observations: null, knowledge_article_id: null,
 };
+
 const ticket: Ticket = {
   id: 10, title: row.title, description: row.description, categoryId: 2,
   priorityId: null, status: 'Assigned', createdBy: 3, assignedTechnicianId: 2,
   storeLocation: 'Centro', motorcycleModel: 'FT150', dueDate: null, resolution: null,
   createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
   resolvedAt: null, closedAt: null, version: 1,
+  // NUEVOS: FR-009 (Alexis)
+  resolutionVerification: null, rootCause: null,
+  resolutionObservations: null, knowledgeArticleId: null,
 };
+
 let query: jest.Mock;
 let release: jest.Mock;
 beforeEach(() => {
@@ -32,10 +40,9 @@ it('commits the versioned update and JSON history together, preserving business 
   expect(saved).toMatchObject({ storeLocation: 'Centro', motorcycleModel: 'FT150', version: 2 });
   const update = query.mock.calls.find(([sql]) => sql.startsWith('UPDATE'))!;
   expect(update[0]).toContain('WHERE id = $11 AND version = $12');
-  expect(update[1].slice(10)).toEqual([10, 1, 'Centro', 'FT150']);
+  expect(update[1].slice(10, 14)).toEqual([10, 1, 'Centro', 'FT150']);
   const event = query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO ticket_history'))!;
   expect(event[1]).toEqual([10, 3, 'assigned', 'null', '2', 'Cambio de responsable', null]);
-  // NFR-009: la auditoría se confirma en la misma transacción que el cambio.
   const calls = query.mock.calls.map(([sql]) => String(sql));
   const auditAt = calls.findIndex((sql) => sql.includes('INSERT INTO audit_log'));
   expect(auditAt).toBeGreaterThan(calls.findIndex((sql) => sql.startsWith('UPDATE')));

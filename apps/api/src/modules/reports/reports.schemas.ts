@@ -66,4 +66,17 @@ export const reportActivityFiltersSchema = z
         'La fecha final debe ser igual o posterior a la inicial.',
       path: ['to'],
     },
+
   );
+
+  /**
+ * FR-017: validación para generar un informe.
+ * El tipo debe ser uno de los del catálogo.
+ */
+export const generateReportSchema = z
+  .object({
+    type: z.enum(['overview', 'tickets', 'workload', 'activity']),
+    filters: z.record(z.string(), z.unknown()).default({}),  })
+  .strict();
+
+  
