@@ -320,3 +320,57 @@ export async function getTicketActivityMetrics(
 
   return result.rows;
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// NFR-012: Advertencias de calidad de datos
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface DataQualityWarning {
+  metric: string;
+  message: string;
+  count: number;
+}
+
+/**
+ * NFR-012: Identifica datos faltantes que podrían afectar la interpretación
+ * de los reportes. No bloquea la generación; solo informa.
+ *
+ * - Tickets activos sin prioridad: podrían no aparecer correctamente en
+ *   la distribución por prioridad.
+ * - Tickets activos sin técnico: no contribuyen a la carga de trabajo.
+ * - Tickets activos sin plazo: no se pueden evaluar como vencidos.
+ */
+export async function getDataQualityWarnings(): Promise<DataQualityWarning[]> {
+  const result = await getPool().query<DataQualityWarning>(`
+    SELECT
+      'withoutPriority' AS metric,
+      'Tickets activos sin prioridad asignada' AS message,
+      COUNT(*)::integer AS count
+    FROM tickets
+    WHERE status NOT IN ('Resolved', 'Closed')
+      AND priority_id IS NULL
+
+    UNION ALL
+
+    SELECT
+      'unassigned' AS metric,
+      'Tickets activos sin técnico asignado' AS message,
+      COUNT(*)::integer AS count
+    FROM tickets
+    WHERE status NOT IN ('Resolved', 'Closed')
+      AND assigned_technician_id IS NULL
+
+    UNION ALL
+
+    SELECT
+      'withoutDeadline' AS metric,
+      'Tickets activos sin plazo definido' AS message,
+      COUNT(*)::integer AS count
+    FROM tickets
+    WHERE status NOT IN ('Resolved', 'Closed')
+      AND due_date IS NULL
+  `);
+
+  // Filtrar solo las advertencias con count > 0
+  return result.rows.filter((w) => w.count > 0);
+}

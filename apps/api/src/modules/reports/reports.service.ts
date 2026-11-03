@@ -7,6 +7,7 @@ import {
   getWorkloadMetrics,
   getReportTickets,
   getTicketActivityMetrics,
+  getDataQualityWarnings,
   type ReportTicketFilters,
   type ActivityFilters,
 } from './reports.repository';
@@ -20,39 +21,49 @@ import {
 
 /**
  * FR-016: obtener estadísticas globales.
+ * NFR-012: incluye dataQuality warnings.
  */
 export async function getOverviewForUser(user: AuthUser) {
   if (!can(user, PERMISSIONS.REPORTS_READ_GLOBAL)) {
     throw Errors.forbidden();
   }
 
-  const metrics = await getOverviewMetrics();
+  const [metrics, dataQuality] = await Promise.all([
+    getOverviewMetrics(),
+    getDataQualityWarnings(),
+  ]);
 
   return {
     ...metrics,
     generatedAt: new Date().toISOString(),
+    dataQuality,
   };
 }
 
 /**
  * FR-016: consultar carga por técnico.
+ * NFR-012: incluye dataQuality warnings.
  */
 export async function getWorkloadForUser(user: AuthUser) {
   if (!can(user, PERMISSIONS.REPORTS_READ_GLOBAL)) {
     throw Errors.forbidden();
   }
 
-  const technicians = await getWorkloadMetrics();
+  const [technicians, dataQuality] = await Promise.all([
+    getWorkloadMetrics(),
+    getDataQualityWarnings(),
+  ]);
 
   return {
     technicians,
     generatedAt: new Date().toISOString(),
+    dataQuality,
   };
 }
 
 /**
  * FR-016: consultar tickets filtrados para reportes.
- * Por ahora requiere acceso global de reportes.
+ * NFR-012: incluye dataQuality warnings.
  */
 export async function getReportTicketsForUser(
   user: AuthUser,
@@ -62,18 +73,23 @@ export async function getReportTicketsForUser(
     throw Errors.forbidden();
   }
 
-  const result = await getReportTickets(filters);
+  const [result, dataQuality] = await Promise.all([
+    getReportTickets(filters),
+    getDataQualityWarnings(),
+  ]);
 
   return {
     ...result,
     limit: filters.limit,
     offset: filters.offset,
     generatedAt: new Date().toISOString(),
+    dataQuality,
   };
 }
 
 /**
  * FR-016: actividad de tickets por periodo.
+ * NFR-012: incluye dataQuality warnings.
  */
 export async function getActivityForUser(
   user: AuthUser,
@@ -83,11 +99,15 @@ export async function getActivityForUser(
     throw Errors.forbidden();
   }
 
-  const days = await getTicketActivityMetrics(filters);
+  const [days, dataQuality] = await Promise.all([
+    getTicketActivityMetrics(filters),
+    getDataQualityWarnings(),
+  ]);
 
   return {
     days,
     generatedAt: new Date().toISOString(),
+    dataQuality,
   };
 }
 
@@ -133,6 +153,7 @@ export function listReportDefinitions(user: AuthUser): ReportDefinition[] {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // FR-017: Generación de informe con metadatos
+// NFR-012: incluye dataQuality warnings y limitations explícitas
 // ──────────────────────────────────────────────────────────────────────────────
 export async function generateReport(
   user: AuthUser,
@@ -169,12 +190,19 @@ export async function generateReport(
       const activityFilters = reportActivityFiltersSchema.parse(filters);
       data = await getActivityForUser(user, activityFilters);
       if (!activityFilters.from || !activityFilters.to) {
-        limitations.push('Sin rango de fechas explícito: se aplica el rango por defecto del servicio.');
+        limitations.push('Sin rango de fechas explícito: se aplica el rango por defecto del servicio (últimos 30 días).');
       }
+      limitations.push('Los días sin actividad no aparecen en el resultado; no se rellenan con ceros.');
       break;
     }
     default:
       throw Errors.validation([{ field: 'type', message: `Tipo de informe no soportado: ${type}` }]);
+  }
+
+  // NFR-012: añadir limitations de calidad de datos si las hay
+  const result = data as { dataQuality?: Array<{ metric: string; message: string; count: number }> };
+  if (result.dataQuality && result.dataQuality.length > 0) {
+    limitations.push('Se detectaron datos faltantes que podrían afectar la interpretación. Ver "dataQuality" en la respuesta.');
   }
 
   return {
