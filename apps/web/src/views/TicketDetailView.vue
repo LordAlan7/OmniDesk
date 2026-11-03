@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../services/api'
 import {
@@ -10,6 +10,10 @@ import {
 import TicketTrackingPanel from '../components/TicketTrackingPanel.vue'
 import {
   addInvestigation,
+  changeTicketStatus,
+  reopenTicket,
+  type ResolutionInput,
+  runTransition,
   assignTechnician,
   getCategories,
   changeTicketCategory,
@@ -69,6 +73,22 @@ const investigationArticleId = ref<number | ''>('')
 const investigationError = ref('')
 const investigationSuccess = ref('')
 const investigationBusy = ref(false)
+
+// NFR-006: acciones visibles y validaciones accesibles del técnico.
+const resolutionText = ref('')
+const resolutionVerification = ref('')
+const rootCause = ref('')
+const resolutionObservations = ref('')
+const resolutionArticleId = ref<number | ''>('')
+const resolutionError = ref('')
+const resolutionSuccess = ref('')
+const technicianBusy = ref(false)
+const resolutionFieldError = ref('')
+const resolutionInput = ref<HTMLTextAreaElement | null>(null)
+const reopenReason = ref('')
+const reopenError = ref('')
+const reopenSuccess = ref('')
+
 
 // Cierre formal
 const closeComment = ref('')
@@ -130,6 +150,28 @@ const canViewInvestigations = computed(() => {
 
 // FR-009: ¿puede cerrar? Visible cuando el ticket está resuelto y el usuario
 // tiene tickets:close. La verificación de "asignado actual o staff" la hace el backend.
+const isAssignedTechnicianOrStaff = computed(() =>
+  !!ticket.value && (
+    ticket.value.assignedTechnicianId === sessionUser.value?.id ||
+    hasPermission('tickets:read:all')
+  ),
+)
+const canStartWork = computed(() =>
+  !!ticket.value && ticket.value.status === 'Assigned' &&
+  hasPermission('tickets:status:update') && isAssignedTechnicianOrStaff.value,
+)
+const canResolve = computed(() =>
+  !!ticket.value && ticket.value.status === 'In Progress' &&
+  hasPermission('tickets:resolve') && isAssignedTechnicianOrStaff.value,
+)
+const canReopenWork = computed(() =>
+  !!ticket.value && ticket.value.status === 'Resolved' &&
+  hasPermission('tickets:status:update') && isAssignedTechnicianOrStaff.value,
+)
+const isPreviousResolution = computed(() =>
+  !!ticket.value?.resolution && !['Resolved', 'Closed'].includes(ticket.value.status),
+)
+
 const canCloseTicket = computed(() =>
   hasPermission('tickets:close') &&
   !!ticket.value &&
@@ -334,6 +376,17 @@ async function loadTicket() {
   investigationSuccess.value = ''
   closeComment.value = ''
   closeError.value = ''
+  resolutionText.value = ''
+  resolutionVerification.value = ''
+  rootCause.value = ''
+  resolutionObservations.value = ''
+  resolutionArticleId.value = ''
+  resolutionError.value = ''
+  resolutionSuccess.value = ''
+  resolutionFieldError.value = ''
+  reopenReason.value = ''
+  reopenError.value = ''
+  reopenSuccess.value = ''
   loading.value = true
 
   try {
@@ -687,6 +740,109 @@ async function handlePreview(att: TicketAttachment) {
   }
 }
 
+// NFR-006 / FR-009: iniciar trabajo, resolver y reabrir respetando los contratos nuevos.
+async function startWork() {
+  if (!ticket.value || !canStartWork.value || technicianBusy.value) return
+  const sequence = loadSequence
+  technicianBusy.value = true
+  resolutionError.value = ''
+  try {
+    const updated = await changeTicketStatus(ticket.value.id, 'In Progress')
+    if (sequence !== loadSequence) return
+    ticket.value = updated
+    resolutionSuccess.value = 'Trabajo iniciado correctamente.'
+    await loadHistory(updated.id, sequence)
+  } catch (cause) {
+    if (sequence !== loadSequence || await handleAccessError(cause)) return
+    resolutionError.value = cause instanceof Error ? cause.message : 'No se pudo iniciar el trabajo.'
+  } finally {
+    technicianBusy.value = false
+  }
+}
+
+function onResolutionInput() {
+  if (resolutionText.value.trim().length >= 5) resolutionFieldError.value = ''
+}
+
+async function submitResolution() {
+  if (!ticket.value || !canResolve.value || technicianBusy.value) return
+  const resolution = resolutionText.value.trim()
+  const verification = resolutionVerification.value.trim()
+  if (resolution.length < 5 || resolution.length > 5000) {
+    resolutionFieldError.value = `La resolución debe tener entre 5 y 5000 caracteres. Actualmente tiene ${resolution.length}.`
+    await nextTick()
+    resolutionInput.value?.focus()
+    return
+  }
+  if (!verification) {
+    resolutionError.value = 'Describe cómo comprobaste que el problema quedó solucionado.'
+    return
+  }
+  const current = ticket.value
+  if (!window.confirm(`¿Confirmas registrar la resolución del ticket #${current.id}?`)) return
+  const sequence = loadSequence
+  technicianBusy.value = true
+  resolutionError.value = ''
+  resolutionSuccess.value = ''
+  try {
+    const input: ResolutionInput = {
+      resolution,
+      resolutionVerification: verification,
+      ...(rootCause.value.trim() ? { rootCause: rootCause.value.trim() } : {}),
+      ...(resolutionObservations.value.trim() ? { observations: resolutionObservations.value.trim() } : {}),
+      ...(resolutionArticleId.value !== '' ? { knowledgeArticleId: Number(resolutionArticleId.value) } : {}),
+    }
+    const updated = await runTransition(
+      current.id,
+      { to: 'Resolved', via: 'resolution', requiresResolution: true },
+      { expectedVersion: current.version, resolution: input },
+      current.status,
+    )
+    if (sequence !== loadSequence) return
+    ticket.value = updated
+    resolutionText.value = ''
+    resolutionVerification.value = ''
+    rootCause.value = ''
+    resolutionObservations.value = ''
+    resolutionArticleId.value = ''
+    resolutionSuccess.value = 'Resolución registrada correctamente.'
+    await loadHistory(updated.id, sequence)
+  } catch (cause) {
+    if (sequence !== loadSequence || await handleAccessError(cause)) return
+    resolutionError.value = cause instanceof Error ? cause.message : 'No se pudo registrar la resolución.'
+  } finally {
+    technicianBusy.value = false
+  }
+}
+
+async function submitReopen() {
+  if (!ticket.value || !canReopenWork.value || technicianBusy.value) return
+  const reason = reopenReason.value.trim()
+  if (!reason) {
+    reopenError.value = 'Indica el motivo por el que necesitas reabrir el trabajo.'
+    return
+  }
+  const current = ticket.value
+  if (!window.confirm(`¿Confirmas reabrir el ticket #${current.id}?`)) return
+  const sequence = loadSequence
+  technicianBusy.value = true
+  reopenError.value = ''
+  reopenSuccess.value = ''
+  try {
+    const updated = await reopenTicket(current.id, { reason, expectedVersion: current.version })
+    if (sequence !== loadSequence) return
+    ticket.value = updated
+    reopenReason.value = ''
+    reopenSuccess.value = 'Trabajo reabierto correctamente.'
+    await loadHistory(updated.id, sequence)
+  } catch (cause) {
+    if (sequence !== loadSequence || await handleAccessError(cause)) return
+    reopenError.value = cause instanceof Error ? cause.message : 'No se pudo reabrir el trabajo.'
+  } finally {
+    technicianBusy.value = false
+  }
+}
+
 watch(
   () => route.params.id,
   () => { void loadTicket() },
@@ -784,12 +940,60 @@ watch(
 
         <TicketTrackingPanel :ticket="ticket" @changed="loadTicket" />
 
+        <!-- NFR-006 + FR-009: atención del ticket con requisitos de verificación. -->
+        <section v-if="canStartWork || canResolve || canReopenWork" class="card technician-actions" :aria-busy="technicianBusy">
+          <h2>Atención del ticket</h2>
+          <p v-if="resolutionSuccess" class="success" role="status">{{ resolutionSuccess }}</p>
+          <p v-if="resolutionError" class="error" role="alert">{{ resolutionError }}</p>
+          <button v-if="canStartWork" type="button" :disabled="technicianBusy" @click="startWork">
+            {{ technicianBusy ? 'Actualizando…' : 'Iniciar trabajo' }}
+          </button>
+
+          <form v-if="canResolve" novalidate @submit.prevent="submitResolution">
+            <label for="resolution-text">Solución aplicada *</label>
+            <p id="resolution-help" class="hint">Describe la solución en español, entre 5 y 5000 caracteres.</p>
+            <textarea id="resolution-text" ref="resolutionInput" v-model="resolutionText" rows="5" minlength="5" maxlength="5000" :disabled="technicianBusy" :aria-invalid="!!resolutionFieldError" :aria-describedby="resolutionFieldError ? 'resolution-help resolution-error' : 'resolution-help'" @input="onResolutionInput" />
+            <p v-if="resolutionFieldError" id="resolution-error" class="field-error" role="alert">{{ resolutionFieldError }}</p>
+            <p class="hint">{{ resolutionText.length }} / 5000 caracteres</p>
+            <label for="resolution-verification">Comprobación del resultado *</label>
+            <textarea id="resolution-verification" v-model="resolutionVerification" rows="3" :disabled="technicianBusy" placeholder="¿Cómo verificaste que quedó solucionado?" />
+            <label for="resolution-cause">Causa identificada (opcional)</label>
+            <textarea id="resolution-cause" v-model="rootCause" rows="2" :disabled="technicianBusy" />
+            <label for="resolution-observations">Observaciones (opcional)</label>
+            <textarea id="resolution-observations" v-model="resolutionObservations" rows="2" :disabled="technicianBusy" />
+            <template v-if="knowledgeArticles.length">
+              <label for="resolution-article">Artículo de conocimiento (opcional)</label>
+              <select id="resolution-article" v-model="resolutionArticleId" :disabled="technicianBusy">
+                <option value="">Sin artículo</option>
+                <option v-for="article in knowledgeArticles" :key="article.id" :value="article.id">{{ article.title }}</option>
+              </select>
+            </template>
+            <button type="submit" :disabled="technicianBusy">{{ technicianBusy ? 'Guardando…' : 'Registrar resolución' }}</button>
+          </form>
+
+          <form v-if="canReopenWork" novalidate @submit.prevent="submitReopen">
+            <label for="reopen-reason">Motivo de reapertura *</label>
+            <textarea id="reopen-reason" v-model="reopenReason" rows="3" :disabled="technicianBusy" placeholder="Explica por qué es necesario continuar el trabajo" />
+            <p v-if="reopenError" class="error" role="alert">{{ reopenError }}</p>
+            <p v-if="reopenSuccess" class="success" role="status">{{ reopenSuccess }}</p>
+            <button type="submit" :disabled="technicianBusy">{{ technicianBusy ? 'Reabriendo…' : 'Reabrir trabajo' }}</button>
+          </form>
+        </section>
+
+        <section v-if="ticket.resolution" class="card">
+          <h2>{{ isPreviousResolution ? 'Resolución anterior' : 'Resolución registrada' }}</h2>
+          <p v-if="isPreviousResolution" class="previous-resolution-note">Esta solución corresponde a una atención anterior. El trabajo actual continúa en progreso.</p>
+          <p class="description">{{ ticket.resolution }}</p>
+          <p v-if="ticket.resolutionVerification"><strong>Comprobación:</strong> {{ ticket.resolutionVerification }}</p>
+          <p v-if="ticket.resolvedAt">Fecha de resolución: {{ formatDate(ticket.resolvedAt) }}</p>
+        </section>
+
         <!-- FR-009: cierre formal con revisión de la resolución -->
         <section v-if="canCloseTicket" class="card closure">
           <h2>Cierre formal</h2>
           <p class="hint">
             Revisa la resolución antes de cerrar. Una vez cerrado, el ticket no se puede modificar
-            (sí se puede reabrir desde el panel de seguimiento).
+            (no se puede reabrir después del cierre).
           </p>
 
           <div class="resolution-review">
@@ -1012,4 +1216,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .attachment-info strong { overflow-wrap: anywhere; }
 .attachment-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .attachment-actions button { padding: 6px 12px; font-size: 13px; }
+.field-error { color: #a52121; font-weight: 700; }
+textarea[aria-invalid="true"] { border: 2px solid #b91c1c; }
+.previous-resolution-note { padding: 12px; border-left: 4px solid #d97706; background: #fffbeb; }
+.technician-actions p { line-height: 1.5; }
+@media (max-width: 600px) { .technician-actions button { min-height: 44px; width: 100%; } }
 </style>

@@ -287,6 +287,14 @@ export interface CreateTicketPayload {
   motorcycleModel: string
 }
 
+// Etiquetas en español usadas por las vistas del NFR-006.
+export const TICKET_PRIORITIES = [
+  { id: 1, name: 'Baja' },
+  { id: 2, name: 'Media' },
+  { id: 3, name: 'Alta' },
+  { id: 4, name: 'Crítica' },
+] as const
+
 export const getCategories = () => apiRequest<Category[]>('/ticket-categories')
 
 export async function createTicket(payload: CreateTicketPayload) {
@@ -369,36 +377,80 @@ export async function getAttachments(ticketId: number): Promise<TicketAttachment
 export async function uploadAttachment(ticketId: number, file: File): Promise<TicketAttachment> {
   const formData = new FormData()
   formData.append('file', file)
-  
+
   const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
   const token = sessionStorage.getItem('omnidesk.token')
-  
+
   const res = await fetch(`${base}/tickets/${ticketId}/attachments`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
   })
-  
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({}))
     throw new ApiError(error.error?.message || 'Error al subir archivo', res.status)
   }
-  
+
   return (await res.json()).data
 }
 
 export async function getAttachmentUrl(ticketId: number, attachmentId: number): Promise<string> {
   const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '')
   const token = sessionStorage.getItem('omnidesk.token')
-  
+
   const res = await fetch(`${base}/tickets/${ticketId}/attachments/${attachmentId}/content`, {
     headers: { Authorization: `Bearer ${token}` },
   })
-  
+
   if (!res.ok) throw new ApiError('Error al descargar', res.status)
-  
+
   const blob = await res.blob()
   return URL.createObjectURL(blob)
+}
+
+// Compatibilidad con NFR-006. FR-009 mantiene sus reglas de validación.
+// La reapertura no puede hacerse sin motivo: debe utilizarse reopenTicket().
+export async function changeTicketStatus(
+  id: number,
+  status: TicketStatus,
+): Promise<Ticket> {
+  const current = await getTicket(id)
+  if (current.status === 'Resolved' && status === 'In Progress') {
+    throw new ApiError(
+      'Para reabrir un ticket debes indicar el motivo. Utiliza la acción de reapertura.',
+      400,
+    )
+  }
+  const response = await apiRequest<Ticket>(`/tickets/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, expectedVersion: current.version }),
+  })
+  return response.data
+}
+
+// FR-009 exige resolutionVerification. No se debe inventar una verificación.
+// La vista debe capturarla y llamar a runTransition() con ResolutionInput.
+export async function resolveTicket(
+  _id: number,
+  _resolution: string,
+): Promise<Ticket> {
+  throw new ApiError(
+    'La resolución requiere describir la verificación. Actualiza el formulario para FR-009.',
+    400,
+  )
+}
+
+// Mantener el selector anterior mientras se adapta la vista a prioridades enriquecidas.
+export async function updateTicketPriority(
+  id: number,
+  priorityId: number,
+): Promise<Ticket> {
+  const current = await getTicket(id)
+  return updatePriority(id, {
+    priorityId,
+    expectedVersion: current.version,
+  })
 }
 
 // =============================================================================

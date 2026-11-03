@@ -2,16 +2,54 @@
 // Override qaPassword / qaTechnician / qaManager / qaEmployee via Cypress.env.
 describe('FR-012 manuales', () => {
   const title=`Manual QA ${Date.now()}`
-  function login(role: 'Technician' | 'Manager' | 'Employee') {
-    cy.visit('/login')
-    const defaults={Technician:'technician@company.com',Manager:'manager@company.com',Employee:'employee@company.com'}
-    cy.get('#email').type(Cypress.env(`qa${role}`) || defaults[role])
-    cy.get('#password').type(Cypress.env('qaPassword') || 'ChangeMe123!',{log:false})
-    cy.contains('button','Iniciar sesión').click()
-    cy.location('pathname').should('not.eq','/login')
-    cy.visit('/knowledge/documents')
-    cy.contains('h1','Manuales y documentación').should('be.visible')
+
+function login(role: 'Technician' | 'Manager' | 'Employee') {
+  const defaults = {
+    Technician: 'technician@company.com',
+    Manager: 'manager@company.com',
+    Employee: 'employee@company.com',
   }
+
+  const emailKey = `qa${role}`
+
+  cy.clearAllSessionStorage()
+  cy.visit('/login')
+
+  cy.env([emailKey, 'qaPassword']).then((values) => {
+    const email = values[emailKey] || defaults[role]
+    const password = values.qaPassword
+
+    if (!password) {
+      throw new Error(
+        'Configura CYPRESS_qaPassword para ejecutar las pruebas.'
+      )
+    }
+
+
+cy.get('#email').type(email)
+cy.get('#password').type(password, { log: false })
+
+cy.intercept('POST', '**/api/v1/auth/login')
+  .as('loginQa')
+
+cy.contains('button', 'Iniciar sesión').click()
+
+cy.wait('@loginQa').then(({ response }) => {
+  cy.log(`Estado HTTP: ${response?.statusCode ?? 'sin respuesta'}`)
+
+  expect(response?.statusCode, 'respuesta del login')
+    .to.eq(200)
+})
+
+  })
+
+  cy.location('pathname').should('not.eq', '/login')
+  cy.visit('/knowledge/documents')
+
+  cy.contains('h1', 'Manuales y documentación')
+    .should('be.visible')
+}
+
   function find() {
     cy.get('input[placeholder="Título, descripción, categoría o fuente"]').clear().type(title)
     cy.contains('button','Buscar').click()

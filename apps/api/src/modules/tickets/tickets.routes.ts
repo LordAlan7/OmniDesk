@@ -18,8 +18,39 @@ import {
   reopenSchema,
 } from './tickets.schemas';
 import * as service from './tickets.service';
+import { trackingQuery, listOwnTickets, ownTicket } from './tickets.tracking';
 
 export const ticketsRouter = Router();
+
+ticketsRouter.get('/me/tickets', authenticate, async (req, res, next) => {
+  try {
+    const { page, limit, ...filters } = trackingQuery.parse(req.query);
+
+    const tickets = await listOwnTickets(
+      currentUser(req),
+      filters
+    );
+
+    paginated(res, tickets, page, limit);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Consultar el detalle de uno de mis tickets
+ticketsRouter.get('/me/tickets/:id', authenticate, async (req, res, next) => {
+  try {
+    const ticket = await ownTicket(
+      parseId(req.params.id),
+      currentUser(req)
+    );
+
+    ok(res, ticket);
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 ticketsRouter.get('/tickets/categories', authenticate, async (_req, res, next) => {
   try {

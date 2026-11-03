@@ -20,7 +20,7 @@ import {
 } from '../../shared/authorization';
 
 
-import { notify } from '../notifications';
+//import { notify } from '../notifications';
 
 import {
 
@@ -53,6 +53,31 @@ import {
   TicketStatus,
 
 } from './tickets.types';
+
+// NFR-008 (Escalabilidad): estado in-process por instancia.
+//
+// `creations` es un cache de idempotencia para la creación de tickets. Si un
+// cliente envía dos veces la misma petición con la misma `Idempotency-Key`, la
+// segunda recibe el ticket ya creado en lugar de duplicarlo.
+//
+// ⚠️ Limitación de multi-instancia: este Map vive en la memoria de CADA proceso.
+// Si la misma petición llega a dos instancias distintas (balanceador round-robin),
+// cada una crea su propio ticket porque no comparten el cache.
+//
+// Mitigación actual (aceptable para single-instance y volúmenes bajos):
+//   - Con < 50 tickets/semana, la probabilidad de que un doble-envío llegue a
+//     instancias distintas es muy baja.
+//   - El cliente genera el `Idempotency-Key` con `crypto.randomUUID()`, así que
+//     cada petición nueva tiene una clave distinta. Solo los reintentos exactos
+//     (mismo key) se benefician del cache.
+//
+// Ruta de migración a multi-instancia (cuando se necesite):
+//   - Añadir una tabla `idempotency_keys` en PostgreSQL que guarde
+//     (key, ticket_id, created_at). Al recibir una petición, hacer INSERT con
+//     ON CONFLICT DO NOTHING y devolver el ticket_id existente si ya estaba.
+//   - Alternativa: Redis con TTL (p. ej. 24h) para no llenar la BD.
+//
+// Ver docs/NFR-008-Scalability.md para el procedimiento de ampliación.
 const creations = new Map<string, { fingerprint: string; result: Promise<Ticket> }>();
 
 export async function listCategories() {
@@ -123,9 +148,11 @@ async function saveWithHistory(
 
   entries: HistoryInput[],
 
+  saveContext?: { actorId: number; previousAssigneeId: number | null },
+
 ): Promise<Ticket> {
 
-  const saved = await ticketsRepository.saveWithHistory(ticket, ticket.version, entries);
+  const saved = await ticketsRepository.saveWithHistory(ticket, ticket.version, entries, saveContext);
 
   return withTechnicianName(saved);
 
@@ -187,25 +214,18 @@ function transition(
 
 }
 
+// FR-020: las notificaciones se generan ahora en el repositorio dentro de
+// saveWithHistory, usando el catálogo. Esta función se mantiene vacía para
+// no romper los callers existentes (se puede eliminar cuando se migren todos).
 function publishStatus(
 
-  ticket: Ticket,
+  _ticket: Ticket,
 
-  entry: HistoryInput,
+  _entry: HistoryInput,
 
 ): void {
 
-  notify(
-
-    ticket.createdBy,
-
-    'ticket.status_changed',
-
-    `Your ticket #${ticket.id} is now "${ticket.status}".`,
-
-    { entity: 'ticket', id: ticket.id },
-
-  );
+  // No-op: las notificaciones las maneja el repositorio vía notifyInTransaction/notifyInMemory.
 
 }
 
@@ -474,6 +494,8 @@ export async function assignTechnician(
 
       }
 
+      const previousAssigneeId = ticket.assignedTechnicianId;
+
       const from = ticket.assignedTechnicianId;
 
       const entries: HistoryInput[] = [];
@@ -504,7 +526,10 @@ export async function assignTechnician(
 
       });
 
-      const saved = await saveWithHistory(ticket, entries);
+      const saved = await saveWithHistory(ticket, entries, {
+        actorId: user.id,
+        previousAssigneeId,
+      });
 
       for (const entry of entries) {
 
@@ -517,18 +542,7 @@ export async function assignTechnician(
       }
 
 
-      notify(
-
-        technicianId,
-
-        'ticket.assigned',
-
-        `Ticket #${id} was assigned to you.`,
-
-        { entity: 'ticket', id },
-
-      );
-
+      // FR-020: la notificación la maneja el repositorio vía notifyInMemory/notifyInTransaction.
       return saved;
 
     },
@@ -593,7 +607,10 @@ export async function changeStatus(
 
   const entry = transition(ticket, to, user);
 
-  const saved = await saveWithHistory(ticket, [entry]);
+  const saved = await saveWithHistory(ticket, [entry], {
+    actorId: user.id,
+    previousAssigneeId: ticket.assignedTechnicianId,
+  });
 
   publishStatus(saved, entry);
 
@@ -660,7 +677,10 @@ export async function resolveTicket(
 
   ticket.resolvedAt = new Date().toISOString();
 
-  const saved = await saveWithHistory(ticket, [entry]);
+  const saved = await saveWithHistory(ticket, [entry], {
+    actorId: user.id,
+    previousAssigneeId: ticket.assignedTechnicianId,
+  });
 
   publishStatus(saved, entry);
 
@@ -857,20 +877,7 @@ export async function addInvestigation(
 
   });
 
-  // Notificación al solicitante (FR-020): la investigación es interna, pero el
-  // solicitante sí debe saber que hay actividad en su ticket.
-  notify(
-
-    ticket.createdBy,
-
-    'ticket.investigation_logged',
-
-    `Se registró una actividad de investigación en tu ticket #${id}.`,
-
-    { entity: 'ticket', id },
-
-  );
-
+  // FR-020: la notificación la maneja el repositorio vía notifyInMemory/notifyInTransaction.
   return investigation;
 
 }

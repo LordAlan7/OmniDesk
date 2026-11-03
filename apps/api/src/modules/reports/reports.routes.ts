@@ -1,14 +1,109 @@
+
 import { Router } from 'express';
-import { notImplemented } from '../../shared/http';
-import { authenticate } from '../../shared/security/guards';
+import { ok } from '../../shared/http';
+
+import {
+  authenticate,
+  currentUser,
+} from '../../shared/security/guards';
+
+import {
+  getOverviewForUser,
+  getWorkloadForUser,
+  getReportTicketsForUser,
+  getActivityForUser,
+} from './reports.service';
+
+import {
+  reportTicketFiltersSchema,
+  reportActivityFiltersSchema,
+} from './reports.schemas';
 
 export const reportsRouter = Router();
-const REQUIREMENTS = ['FR-016', 'FR-017', 'NFR-012'];
 
-// TODO: implementar cada endpoint (routes -> controller -> service -> repository).
-// Endpoints tomados de la sección "API design" del documento de diseño.
-const handler = notImplemented('reports', REQUIREMENTS);
+/**
+ * FR-016: indicadores generales.
+ */
+reportsRouter.get(
+  '/reports/overview',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const result = await getOverviewForUser(
+        currentUser(req),
+      );
 
-reportsRouter.get('/reports/overview', authenticate, handler);
-reportsRouter.get('/reports/tickets', authenticate, handler);
-reportsRouter.get('/reports/workload', authenticate, handler);
+      ok(res, result);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * FR-016: tickets con filtros y paginacion.
+ */
+reportsRouter.get(
+  '/reports/tickets',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const filters = reportTicketFiltersSchema.parse(
+        req.query,
+      );
+
+      const result = await getReportTicketsForUser(
+        currentUser(req),
+        filters,
+      );
+
+      ok(res, result);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * FR-016: carga de trabajo por tecnico.
+ */
+reportsRouter.get(
+  '/reports/workload',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const result = await getWorkloadForUser(
+        currentUser(req),
+      );
+
+      ok(res, result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+);
+
+/**
+ * FR-016: actividad de tickets por periodo.
+ */
+reportsRouter.get(
+  '/reports/activity',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const filters = reportActivityFiltersSchema.parse(
+        req.query,
+      );
+
+      const result = await getActivityForUser(
+        currentUser(req),
+        filters,
+      );
+
+      ok(res, result);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
