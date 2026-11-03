@@ -30,3 +30,16 @@ export function getPool(): Pool {
   });
   return pool;
 }
+/**
+ * NFR-004: Health check de la base de datos.
+ * Verifica que la conexión a PostgreSQL esté activa.
+ */
+export async function checkDatabaseHealth(): Promise<'connected' | 'error'> {
+  try {
+    const pool = getPool();
+    await pool.query('SELECT 1');
+    return 'connected';
+  } catch {
+    return 'error';
+  }
+}
