@@ -3,15 +3,18 @@ const SENSITIVE_KEYS =
 
 /** Descripción segura de un error para logs: nunca incluye credenciales ni parámetros de consultas. */
 export function safeErrorLog(err: unknown): Record<string, unknown> {
-  if (!(err instanceof Error)) return { error: typeof err };
+  // Se usa una comprobación estructural: `instanceof Error` falla entre contextos (p. ej. Jest, AggregateError).
+  if (typeof err !== 'object' || err === null || !('message' in err)) return { error: typeof err };
 
   const { code } = err as { code?: unknown };
 
+  const { name, message, stack } = err as Error;
+
   return {
-    name: err.name,
-    message: err.message,
+    name,
+    message,
     code: typeof code === 'string' ? code : undefined,
-    stack: err.stack,
+    stack,
   };
 }
 
