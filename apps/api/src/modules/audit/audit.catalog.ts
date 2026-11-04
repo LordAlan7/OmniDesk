@@ -80,6 +80,15 @@ export const AUDIT_EVENTS = {
   'document.metadata.updated': event('knowledge_document', 'knowledge', 'Metadatos del documento actualizados.'),
   'document.publication.updated': event('knowledge_document', 'knowledge', 'Publicación del documento actualizada.'),
 
+  // IA: fuentes autorizadas (AIR-002)
+  'ai.source_requested': event('ai_source', 'ai', 'Se propuso una fuente (y versión exacta) para el contexto de IA.'),
+  'ai.source_approved': event('ai_source', 'ai', 'Una persona autorizada aprobó la fuente y versión para IA.'),
+  'ai.source_rejected': event('ai_source', 'ai', 'La propuesta de fuente fue rechazada.'),
+  'ai.source_revoked': event('ai_source', 'ai', 'La autorización de la fuente para IA fue retirada.'),
+  'ai.source_invalidated': event('ai_source', 'ai', 'La autorización dejó de ser válida (cambió la versión o la fuente dejó de ser elegible).'),
+  'ai.source_ingested': event('ai_source', 'ai', 'La versión autorizada se fragmentó para recuperación.'),
+  'ai.source_ingestion_failed': event('ai_source', 'ai', 'Falló la extracción de la fuente autorizada; no se usa.', { outcome: 'rejected' }),
+
   // IA (FR-013 / FR-015): reservados. Distinguen propuesta, revisión, aprobación y aplicación.
   'ai.suggestion_generated': event('ai_interaction', 'ai', 'La IA generó una propuesta (AIInteraction).', { implemented: false }),
   'ai.suggestion_reviewed': event('ai_validation', 'ai', 'Una persona revisó la propuesta (AIValidation).', { implemented: false }),

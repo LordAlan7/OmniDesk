@@ -53,6 +53,18 @@ const opciones = computed(() =>
       visible: session.can('users:read:list'),
     },
     {
+      titulo: 'Fuentes autorizadas para IA',
+      descripcion: 'Aprueba o retira las fuentes que puede usar el asistente.',
+      ruta: '/ai/sources',
+      visible: session.can('ai:sources:read'),
+    },
+    {
+      titulo: 'Auditoría',
+      descripcion: 'Consulta el registro de acciones relevantes.',
+      ruta: '/audit',
+      visible: session.can('audit:read'),
+    },
+    {
       titulo: 'Biblioteca de documentos',
       descripcion: 'Consulta los documentos de conocimiento.',
       ruta: '/knowledge/documents',

@@ -37,6 +37,9 @@ export const PERMISSIONS = {
   // AI
   AI_QUERY: 'ai:query',
   AI_VALIDATE: 'ai:validate',
+  AI_SOURCES_READ: 'ai:sources:read',
+  AI_SOURCES_REQUEST: 'ai:sources:request',
+  AI_SOURCES_REVIEW: 'ai:sources:review',
 
   // Reports
   REPORTS_READ: 'reports:read',

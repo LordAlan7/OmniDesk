@@ -31,6 +31,7 @@ Fuente única: [audit.catalog.ts](../apps/api/src/modules/audit/audit.catalog.ts
 | tickets | `ticket.created`, `.updated`, `.status_changed`, `.assigned`, `.priority_changed`, `.category_changed`, `.business_info_updated`, `.deadline_changed`, `.progress_update` |
 | files | `ticket.attachment_uploaded` |
 | knowledge | `knowledge.created/updated/draft/approved/retired`, `document.created`, `document.metadata.updated`, `document.publication.updated` |
+| ai (AIR-002) | `ai.source_requested`, `.source_approved`, `.source_rejected`, `.source_revoked`, `.source_invalidated`, `.source_ingested`, `.source_ingestion_failed` (rejected) |
 | ai (reservados) | `ai.suggestion_generated`, `.reviewed`, `.approved`, `.rejected`, `.applied`, `ai.request_failed` |
 
 **Cobertura verificada por prueba:** `audit.catalog.test.ts` falla si el código registra una acción fuera del catálogo, si una acción de `ticket_history` no está mapeada (o declarada solo-historial) o si un evento marcado `implemented` no se produce en ningún lugar.

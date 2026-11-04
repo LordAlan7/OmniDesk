@@ -45,6 +45,10 @@ export async function findDocument(client: PoolClient, id: number, actor: AuthUs
   return (await client.query<DocumentRecord>(`SELECT ${projection} FROM ${tables}
     WHERE ${visibility} AND d.id=$4 ${lock ? 'FOR UPDATE OF d, a' : ''}`, [...actorValues(actor), id])).rows[0];
 }
+/** Sin filtro de visibilidad: solo para verificar el estado real de una fuente (AIR-002). */
+export async function findDocumentUnrestricted(client: PoolClient, id: number) {
+  return (await client.query<DocumentRecord>(`SELECT ${projection} FROM ${tables} WHERE d.id=$1`, [id])).rows[0];
+}
 export async function listDocuments(actor: AuthUser, query: DocumentQuery) {
   const values = [...actorValues(actor), query.search, query.categoryId ?? null, query.status ?? null];
   const where = `${visibility} AND ($4::text='' OR

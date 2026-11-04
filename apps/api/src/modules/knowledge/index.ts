@@ -11,4 +11,8 @@ export { knowledgeRouter } from './knowledge.routes';
 // aprobados son legibles por cualquier usuario autenticado (FR-011).
 export { findApprovedArticleById, getArticle  } from './knowledge.service';
 
+// AIR-002: estado real de las fuentes (versión, huella, elegibilidad y permiso de lectura del usuario).
+export { snapshotArticle, snapshotDocument } from './ai-source';
+export type { KnowledgeSourceSnapshot, KnowledgeSourceType, SourceContent } from './ai-source';
+
 export type { KnowledgeArticle } from './knowledge.types';

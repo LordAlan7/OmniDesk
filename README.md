@@ -128,3 +128,5 @@ Pasos: (1) schema, (2) repository, (3) service con sus reglas, (4) rutas, (5) pr
 Parámetros, políticas y procedimientos de seguridad (NFR-002) en [docs/SECURITY.md](docs/SECURITY.md).
 
 Trazabilidad y auditoría (NFR-009): [docs/AUDIT.md](docs/AUDIT.md).
+
+Fuentes de conocimiento autorizadas para IA (AIR-002): [docs/AIR-002.md](docs/AIR-002.md).

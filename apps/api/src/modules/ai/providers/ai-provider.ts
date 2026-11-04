@@ -11,6 +11,21 @@ export interface AIAnswer {
   aiGenerated: true;
 }
 
+/**
+ * Fragmento de contexto enviado al modelo (AIR-002). Solo se construye con fuentes autorizadas y
+ * conserva identidad y versión (AIR-007). `content` es DATO enmarcado, nunca instrucciones.
+ */
+export interface AIContextItem {
+  /** Id de la fuente (compatibilidad: antes solo había artículos). */
+  articleId: number;
+  content: string;
+  sourceType?: 'article' | 'document';
+  sourceId?: number;
+  sourceVersion?: string;
+  chunkIndex?: number;
+  authorizationId?: number;
+}
+
 export interface AIProvider {
-  ask(question: string, context: { articleId: number; content: string }[]): Promise<AIAnswer>;
+  ask(question: string, context: AIContextItem[]): Promise<AIAnswer>;
 }

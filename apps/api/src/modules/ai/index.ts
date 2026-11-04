@@ -8,3 +8,10 @@
 export { aiRouter } from './ai.routes';
 export type { AIProvider, AIAnswer } from './providers/ai-provider';
 export { createAIProvider } from './providers';
+
+// AIR-002: fuentes de conocimiento autorizadas y recuperación filtrada.
+export { askWithAuthorizedSources, INSUFFICIENT_INFORMATION } from './ai.service';
+export { retrieveAuthorizedContext } from './sources/retrieval';
+export { referenceStatus } from './sources/sources.service';
+export type { AuthorizedAnswer } from './ai.service';
+export type { SourceReference } from './sources/sources.types';
