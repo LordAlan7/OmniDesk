@@ -15,3 +15,7 @@ export { retrieveAuthorizedContext } from './sources/retrieval';
 export { referenceStatus } from './sources/sources.service';
 export type { AuthorizedAnswer } from './ai.service';
 export type { SourceReference } from './sources/sources.types';
+
+// AIR-008: contexto de ticket filtrado e interacciones con acceso por dueño.
+export { buildTicketContext } from './context/ticket-context';
+export { getInteractionForUser, recordInteraction } from './interactions/interactions';

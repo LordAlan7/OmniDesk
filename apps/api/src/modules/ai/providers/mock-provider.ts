@@ -12,7 +12,7 @@ export class MockAIProvider implements AIProvider {
     }
     return {
       text: `[MOCK] Suggested answer for: "${question}"`,
-      sources: context.map((c) => c.articleId),
+      sources: context.filter((c) => c.sourceType !== 'ticket').map((c) => c.articleId),
       aiGenerated: true,
     };
   }

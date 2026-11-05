@@ -130,3 +130,5 @@ Parámetros, políticas y procedimientos de seguridad (NFR-002) en [docs/SECURIT
 Trazabilidad y auditoría (NFR-009): [docs/AUDIT.md](docs/AUDIT.md).
 
 Fuentes de conocimiento autorizadas para IA (AIR-002): [docs/AIR-002.md](docs/AIR-002.md).
+
+Control de acceso al asistente y al conocimiento (AIR-008): [docs/AIR-008.md](docs/AIR-008.md).
