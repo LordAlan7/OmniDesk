@@ -60,6 +60,13 @@ export const env = {
   openAiApiKey: process.env.OPENAI_API_KEY,
   /** Adaptadores externos: 'mock' / 'memory' no llaman a ningún servicio real. */
   aiProvider: process.env.AI_PROVIDER ?? 'mock',
+  /**
+   * AIR-001: modelo de chat usado por el proveedor OpenAI.
+   * El resto del código NO lo lee: solo lo usa providers/openai-provider.ts
+   * a través de `env.aiOpenAiModel`. Default 'gpt-4o-mini' (suficiente para
+   * RAG interno de soporte). Cambiar solo con acuerdo del equipo.
+   */
+  aiOpenAiModel: process.env.AI_OPENAI_MODEL ?? 'gpt-4o-mini',
   storageProvider: process.env.STORAGE_PROVIDER ?? 'memory',
   /** Usuarios de demostración (solo desarrollo/pruebas). */
   seedDemoData: !isProduction,

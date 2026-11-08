@@ -8,6 +8,7 @@ import {
   sessionUser,
 } from '../services/session'
 import TicketTrackingPanel from '../components/TicketTrackingPanel.vue'
+import AssistantPanel from '../components/AssistantPanel.vue'
 import {
   addInvestigation,
   changeTicketStatus,
@@ -1163,6 +1164,14 @@ watch(
             </li>
           </ol>
         </section>
+
+        <!-- AIR-001: Asistente de IA dentro del detalle del ticket (decisión 2).
+             El ticketId se pasa automáticamente (decisión 4). El permiso ai:query
+             lo decide el backend; aquí solo ocultamos la UI a quien no lo tenga. -->
+        <AssistantPanel
+          v-if="ticket && hasPermission('ai:query')"
+          :ticket-id="ticket.id"
+        />
       </template>
 
       <button v-if="error && !loading" @click="loadTicket">Reintentar</button>

@@ -54,20 +54,27 @@ describe.skip('NFR-009 event catalog coverage', () => {
     }
   });
 
-  it('reserved AI events distinguish proposal, review, approval and application', () => {
+  it('reserved AI events distinguish proposal review, approval and application', () => {
+    // AIR-001 ya implementó ai.suggestion_generated y ai.request_failed; quedan
+    // reservados los de revisión/aprobación/aplicación (FR-015 aún pendiente).
     const reserved = AUDIT_ACTIONS.filter((action) => !AUDIT_EVENTS[action].implemented);
     expect(reserved).toEqual(
       expect.arrayContaining([
-        'ai.suggestion_generated',
         'ai.suggestion_reviewed',
         'ai.suggestion_approved',
+        'ai.suggestion_rejected',
         'ai.suggestion_applied',
       ]),
     );
+    // Confirmamos que AIR-001 ya NO son reservados.
+    expect(AUDIT_EVENTS['ai.suggestion_generated'].implemented).toBe(true);
+    expect(AUDIT_EVENTS['ai.request_failed'].implemented).toBe(true);
+    expect(AUDIT_EVENTS['ai.request_failed'].outcome).toBe('rejected');
   });
 
   it('failed attempts are flagged as rejected, never as applied changes', () => {
     expect(AUDIT_EVENTS['auth.login_failed'].outcome).toBe('rejected');
     expect(AUDIT_EVENTS['ticket.status_changed'].outcome).toBe('applied');
+    expect(AUDIT_EVENTS['ai.request_failed'].outcome).toBe('rejected');
   });
 });

@@ -89,15 +89,24 @@ export const AUDIT_EVENTS = {
   'ai.source_ingested': event('ai_source', 'ai', 'La versión autorizada se fragmentó para recuperación.'),
   'ai.source_ingestion_failed': event('ai_source', 'ai', 'Falló la extracción de la fuente autorizada; no se usa.', { outcome: 'rejected' }),
 
-  // IA (FR-013 / FR-015): reservados. Distinguen propuesta, revisión, aprobación y aplicación.
-  'ai.suggestion_generated': event('ai_interaction', 'ai', 'La IA generó una propuesta (AIInteraction).', { implemented: false }),
+  // IA (AIR-001): propuesta generada por el asistente. Se registra cada vez que
+  // /ai/ask responde (answered o insufficient_information). El texto generado NO
+  // se persiste en auditoría (vive en la interacción en memoria; la política de
+  // retención se define aparte). Solo se guarda: usuario, ticketId opcional,
+  // status y número de referencias (AIR-007: la traza es suficiente para
+  // reconstruir quién, cuándo, sobre qué y con qué fuentes).
+  'ai.suggestion_generated': event('ai_interaction', 'ai', 'La IA generó una propuesta (AIR-001).', {
+    valuesInAudit: false,
+  }),
   'ai.suggestion_reviewed': event('ai_validation', 'ai', 'Una persona revisó la propuesta (AIValidation).', { implemented: false }),
   'ai.suggestion_approved': event('ai_validation', 'ai', 'Una persona aprobó la propuesta.', { implemented: false }),
   'ai.suggestion_rejected': event('ai_validation', 'ai', 'Una persona rechazó la propuesta.', { implemented: false }),
   'ai.suggestion_applied': event('ai_interaction', 'ai', 'La propuesta aprobada se aplicó a un recurso.', { implemented: false }),
-  'ai.request_failed': event('ai_interaction', 'ai', 'Error relevante del proveedor de IA (sin claves ni contexto innecesario).', {
+  // AIR-009: fallo del proveedor de IA. Sin claves ni contexto; solo usuario,
+  // ticketId opcional y mensaje de error sanitizado.
+  'ai.request_failed': event('ai_interaction', 'ai', 'Error del proveedor de IA al generar respuesta.', {
     outcome: 'rejected',
-    implemented: false,
+    valuesInAudit: false,
   }),
 } as const satisfies Record<string, AuditEventDefinition>;
 
