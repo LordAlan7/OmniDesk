@@ -9,6 +9,9 @@ import type { SourceReference } from '../sources/sources.types';
  * Interacciones con el asistente (AIR-008). Cada una pertenece a UN usuario: no hay ámbito compartido
  * mientras no se apruebe una política (por aprobar). FR-013 las creará; aquí solo se define el acceso.
  * Almacén en memoria: la persistencia en PostgreSQL llega con FR-013/AIR-007.
+ *
+ * AIR-004: añadimos `ticketId` (opcional) para que el flujo de revisión/aplicación
+ * pueda revalidar el acceso al ticket sin necesidad de pedirlo de nuevo al cliente.
  */
 export interface AiInteraction {
   id: number;
@@ -16,6 +19,8 @@ export interface AiInteraction {
   question: string;
   answer: string;
   references: SourceReference[];
+  /** AIR-004: ticket al que se asoció la consulta, si lo hubo. Lo usa /review y /apply. */
+  ticketId?: number | null;
   createdAt: string;
 }
 
@@ -35,6 +40,11 @@ export function recordInteraction(input: Omit<AiInteraction, 'id' | 'createdAt'>
 export function resetInteractions(): void {
   store.clear();
   nextId = 1;
+}
+
+/** AIR-004: acceso a una interacción por id (sin revalidar referencias). Lo usa /review y /apply. */
+export function getInteractionById(id: number): AiInteraction | undefined {
+  return store.get(id);
 }
 
 /**

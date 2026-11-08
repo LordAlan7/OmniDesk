@@ -54,27 +54,31 @@ describe.skip('NFR-009 event catalog coverage', () => {
     }
   });
 
-  it('reserved AI events distinguish proposal review, approval and application', () => {
-    // AIR-001 ya implementó ai.suggestion_generated y ai.request_failed; quedan
-    // reservados los de revisión/aprobación/aplicación (FR-015 aún pendiente).
+  it('all AI events are now implemented after AIR-004', () => {
+    // AIR-001 implementó ai.suggestion_generated y ai.request_failed.
+    // AIR-004 implementó ai.suggestion_reviewed, ai.suggestion_approved,
+    //                 ai.suggestion_rejected y ai.suggestion_applied.
+    // Ya no queda ningún evento reservado de IA en el catálogo.
     const reserved = AUDIT_ACTIONS.filter((action) => !AUDIT_EVENTS[action].implemented);
-    expect(reserved).toEqual(
-      expect.arrayContaining([
-        'ai.suggestion_reviewed',
-        'ai.suggestion_approved',
-        'ai.suggestion_rejected',
-        'ai.suggestion_applied',
-      ]),
-    );
-    // Confirmamos que AIR-001 ya NO son reservados.
-    expect(AUDIT_EVENTS['ai.suggestion_generated'].implemented).toBe(true);
-    expect(AUDIT_EVENTS['ai.request_failed'].implemented).toBe(true);
-    expect(AUDIT_EVENTS['ai.request_failed'].outcome).toBe('rejected');
+    expect(reserved).toEqual([]);
+  });
+
+  it('AIR-004 review events have the right outcome and valuesInAudit', () => {
+    expect(AUDIT_EVENTS['ai.suggestion_reviewed'].implemented).toBe(true);
+    expect(AUDIT_EVENTS['ai.suggestion_reviewed'].valuesInAudit).toBe(false);
+    expect(AUDIT_EVENTS['ai.suggestion_approved'].implemented).toBe(true);
+    expect(AUDIT_EVENTS['ai.suggestion_approved'].valuesInAudit).toBe(false);
+    expect(AUDIT_EVENTS['ai.suggestion_rejected'].implemented).toBe(true);
+    expect(AUDIT_EVENTS['ai.suggestion_rejected'].outcome).toBe('rejected');
+    expect(AUDIT_EVENTS['ai.suggestion_rejected'].valuesInAudit).toBe(false);
+    expect(AUDIT_EVENTS['ai.suggestion_applied'].implemented).toBe(true);
+    expect(AUDIT_EVENTS['ai.suggestion_applied'].valuesInAudit).toBe(false);
   });
 
   it('failed attempts are flagged as rejected, never as applied changes', () => {
     expect(AUDIT_EVENTS['auth.login_failed'].outcome).toBe('rejected');
     expect(AUDIT_EVENTS['ticket.status_changed'].outcome).toBe('applied');
     expect(AUDIT_EVENTS['ai.request_failed'].outcome).toBe('rejected');
+    expect(AUDIT_EVENTS['ai.suggestion_rejected'].outcome).toBe('rejected');
   });
 });

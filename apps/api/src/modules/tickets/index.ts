@@ -12,6 +12,17 @@ export { ticketsRouter } from './tickets.routes';
 
 export { getTicketForUser } from './tickets.service';
 
+// AIR-004: el módulo AI necesita aplicar recomendaciones aprobadas al ticket
+// reutilizando FR-009 (no duplica lógica). Se exportan los servicios de FR-009
+// para que el módulo AI los llame sin tocar el repositorio.
+export {
+  addInvestigation,
+  resolveTicket,
+  closeTicket,
+  reopenTicket,
+  listInvestigations,
+} from './tickets.service';
+
 export {
   hasPendingTicketsForTechnician,
   configureArticleReferenceChecker,

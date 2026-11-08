@@ -65,7 +65,7 @@ export const AUDIT_EVENTS = {
     historyAction: 'reopened',
   }),
   'ticket.attachment_uploaded': event('ticket', 'files', 'Archivo adjunto cargado.'),
-  
+
   // NUEVAS: FR-019 (Problemas recurrentes)
   'ticket.recurring_problem_linked': event('ticket', 'tickets', 'Problema recurrente vinculado al ticket.'),
   'ticket.recurring_problem_unlinked': event('ticket', 'tickets', 'Problema recurrente desvinculado del ticket.'),
@@ -89,21 +89,34 @@ export const AUDIT_EVENTS = {
   'ai.source_ingested': event('ai_source', 'ai', 'La versión autorizada se fragmentó para recuperación.'),
   'ai.source_ingestion_failed': event('ai_source', 'ai', 'Falló la extracción de la fuente autorizada; no se usa.', { outcome: 'rejected' }),
 
-  // IA (AIR-001): propuesta generada por el asistente. Se registra cada vez que
-  // /ai/ask responde (answered o insufficient_information). El texto generado NO
-  // se persiste en auditoría (vive en la interacción en memoria; la política de
-  // retención se define aparte). Solo se guarda: usuario, ticketId opcional,
-  // status y número de referencias (AIR-007: la traza es suficiente para
-  // reconstruir quién, cuándo, sobre qué y con qué fuentes).
+  // IA (AIR-001): propuesta generada por el asistente. El texto generado NO se
+  // persiste en auditoría; solo se guarda usuario, ticketId opcional, status y
+  // número de referencias (AIR-007).
   'ai.suggestion_generated': event('ai_interaction', 'ai', 'La IA generó una propuesta (AIR-001).', {
     valuesInAudit: false,
   }),
-  'ai.suggestion_reviewed': event('ai_validation', 'ai', 'Una persona revisó la propuesta (AIValidation).', { implemented: false }),
-  'ai.suggestion_approved': event('ai_validation', 'ai', 'Una persona aprobó la propuesta.', { implemented: false }),
-  'ai.suggestion_rejected': event('ai_validation', 'ai', 'Una persona rechazó la propuesta.', { implemented: false }),
-  'ai.suggestion_applied': event('ai_interaction', 'ai', 'La propuesta aprobada se aplicó a un recurso.', { implemented: false }),
-  // AIR-009: fallo del proveedor de IA. Sin claves ni contexto; solo usuario,
-  // ticketId opcional y mensaje de error sanitizado.
+
+  // IA (AIR-004): revisión humana de la recomendación. Se registra en cada
+  // decisión (incluida la actualización de una decisión previa: supersedesId en
+  // metadata). Sin texto de la recomendación ni claves; el contenido vivirá en
+  // FR-015 cuando se persista, no aquí (valuesInAudit=false).
+  'ai.suggestion_reviewed': event('ai_validation', 'ai', 'Una persona revisó la propuesta (AIR-004).', {
+    valuesInAudit: false,
+  }),
+  'ai.suggestion_approved': event('ai_validation', 'ai', 'Una persona aprobó la propuesta (AIR-004).', {
+    valuesInAudit: false,
+  }),
+  'ai.suggestion_rejected': event('ai_validation', 'ai', 'Una persona rechazó la propuesta (AIR-004).', {
+    outcome: 'rejected',
+    valuesInAudit: false,
+  }),
+  // AIR-004 + FR-009: la recomendación aprobada se aplicó al ticket (a una
+  // investigación o a la resolución). El guardado lo hace FR-009; aquí sólo
+  // enlazamos la interacción con el ticket y el resultado (saved id).
+  'ai.suggestion_applied': event('ai_interaction', 'ai', 'La propuesta aprobada se aplicó a un recurso (AIR-004 + FR-009).', {
+    valuesInAudit: false,
+  }),
+  // AIR-009: fallo del proveedor de IA.
   'ai.request_failed': event('ai_interaction', 'ai', 'Error del proveedor de IA al generar respuesta.', {
     outcome: 'rejected',
     valuesInAudit: false,
