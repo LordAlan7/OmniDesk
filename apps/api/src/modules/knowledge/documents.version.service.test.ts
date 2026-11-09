@@ -30,7 +30,7 @@ const documentRecord = {
   fileId: 55,
   status: 'published',
   versionId: 'version-original',
-} as NonNullable<
+} as unknown as NonNullable<
   Awaited<ReturnType<typeof repository.findDocument>>
 >;
 
@@ -88,7 +88,7 @@ describe('AIR-003 - Validacion de version en descarga', () => {
 
   test('oculta documentos inaccesibles', async () => {
     jest.mocked(repository.findDocument)
-      .mockResolvedValue(null);
+      .mockResolvedValue(null as unknown as Awaited<ReturnType<typeof repository.findDocument>>);
 
     await expect(
       content(10, technician, 'version-original')
