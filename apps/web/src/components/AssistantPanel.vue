@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AIReferences from './AIReferences.vue'
 import { computed, nextTick, ref } from 'vue'
 import { ApiError } from '@/api/http'
 import {
@@ -6,7 +7,6 @@ import {
   reviewInteraction,
   applyInteraction,
   type AssistantAnswer,
-  type AssistantReference,
   type ReviewDecision,
   type ApplyInvestigationContent,
   type ApplyResolutionContent,
@@ -217,10 +217,6 @@ async function scrollToEnd() {
   if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
 }
 
-function sourceLabel(ref: AssistantReference): string {
-  const tipo = ref.sourceType === 'article' ? 'Artículo' : 'Documento'
-  return `${tipo} #${ref.sourceId} (v${ref.sourceVersion}) — ${ref.title}`
-}
 </script>
 
 <template>
@@ -258,14 +254,7 @@ function sourceLabel(ref: AssistantReference): string {
           <p v-if="props.ticketId" class="hint">
             Contexto usado: ticket #{{ props.ticketId }}.
           </p>
-          <details v-if="turn.answer.references.length" class="refs">
-            <summary>Fuentes usadas ({{ turn.answer.references.length }})</summary>
-            <ul>
-              <li v-for="(r, i) in turn.answer.references" :key="i">
-                {{ sourceLabel(r) }}
-              </li>
-            </ul>
-          </details>
+          <AIReferences :references="turn.answer.references" />
           <p class="ai-disclaimer">⚠ Respuesta generada por IA. Revisa antes de aplicar.</p>
 
           <!-- AIR-004: acciones de revisión. Sólo para usuarios con ai:validate.

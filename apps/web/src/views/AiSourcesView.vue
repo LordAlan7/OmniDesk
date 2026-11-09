@@ -8,6 +8,7 @@ import {
   rejectAiSource,
   requestAiSource,
   revokeAiSource,
+  retryAiSourceIngestion,
   type AiSourceAuthorization,
   type AiSourceType,
   type AuthorizationStatus,
@@ -94,6 +95,10 @@ function revoke(item: AiSourceAuthorization) {
   if (reason) void run(() => revokeAiSource(item.id, reason))
 }
 
+function retrySource(item: AiSourceAuthorization) {
+  void run(() => retryAiSourceIngestion(item.id))
+}
+
 onMounted(load)
 </script>
 
@@ -177,6 +182,14 @@ onMounted(load)
                 <button :disabled="busy" @click="approve(item)">Aprobar</button>
                 <button class="secondary" :disabled="busy" @click="reject(item)">Rechazar</button>
               </template>
+              <button
+                v-if="canReview && item.status === 'approved' && item.ingestionStatus === 'failed'"
+                class="secondary"
+                :disabled="busy"
+                @click="retrySource(item)"
+              >
+                Reintentar ingesta
+              </button>
               <button v-if="canReview && item.status === 'approved'" class="secondary" :disabled="busy" @click="revoke(item)">
                 Retirar
               </button>

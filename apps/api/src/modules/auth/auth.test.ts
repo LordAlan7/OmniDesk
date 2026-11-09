@@ -1,3 +1,8 @@
+jest.mock('../../shared/db/pool', () => ({
+  ...jest.requireActual('../../shared/db/pool'),
+  checkDatabaseHealth: jest.fn().mockResolvedValue('connected'),
+}));
+
 import request from 'supertest';
 import { app, bearer, loginAs } from '../../test-helpers';
 

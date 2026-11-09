@@ -7,6 +7,7 @@ import type { AIProvider } from './providers/ai-provider';
 import { retrieveAuthorizedContext } from './sources/retrieval';
 import { frameAsData } from './sources/sources.policy';
 import type { SourceReference } from './sources/sources.types';
+import { validateCitedReferences } from './ai.citations';
 
 export const INSUFFICIENT_INFORMATION =
   'No hay información autorizada suficiente para responder esta consulta.';
@@ -67,10 +68,34 @@ export async function askWithAuthorizedSources(
     return { status: 'insufficient_information', message: INSUFFICIENT_INFORMATION, references: [], aiGenerated: true };
   }
 
+  let references: SourceReference[];
+
+  try {
+    references = validateCitedReferences(
+      answer.citations,
+      retrieval.fragments
+    );
+  } catch {
+    return {
+      status: 'insufficient_information',
+      message: INSUFFICIENT_INFORMATION,
+      references: [],
+      aiGenerated: true,
+    };
+  }
+
+  if (references.length === 0) {
+    return {
+      status: 'insufficient_information',
+      message: INSUFFICIENT_INFORMATION,
+      references: [],
+      aiGenerated: true,
+    };
+  }
+
   return {
-    status: 'answered',
-    answer: answer.text,
-    references: retrieval.fragments.map(({ content: _content, ...reference }) => reference),
+    status: 'answered',    answer: answer.text,
+    references,
     aiGenerated: true,
   };
 }

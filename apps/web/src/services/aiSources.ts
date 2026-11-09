@@ -46,3 +46,9 @@ export async function rejectAiSource(id: number, note: string) {
 export async function revokeAiSource(id: number, reason: string) {
   return (await apiPage<AiSourceAuthorization>(`/ai/sources/${id}/revoke`, { method: 'POST', body: { reason } })).data
 }
+export async function retryAiSourceIngestion(id: number): Promise<AiSourceAuthorization> {
+  return (await apiPage<AiSourceAuthorization>(
+    `/ai/sources/${id}/retry-ingestion`,
+    { method: 'POST' },
+  )).data
+}

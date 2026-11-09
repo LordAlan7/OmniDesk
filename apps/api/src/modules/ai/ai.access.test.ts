@@ -20,7 +20,23 @@ class SpyProvider implements AIProvider {
   calls: { question: string; context: AIContextItem[] }[] = [];
   async ask(question: string, context: AIContextItem[]): Promise<AIAnswer> {
     this.calls.push({ question, context });
-    return { text: 'respuesta', sources: [], aiGenerated: true };
+    const citations = context
+      .filter((item) =>
+        item.sourceType !== 'ticket' &&
+        Number.isSafeInteger(item.authorizationId) &&
+        Number.isSafeInteger(item.chunkIndex)
+      )
+      .map((item) => ({
+        authorizationId: item.authorizationId!,
+        chunkIndex: item.chunkIndex!,
+      }));
+
+    return {
+      text: 'respuesta',
+      sources: [],
+      citations,
+      aiGenerated: true,
+    };
   }
 }
 

@@ -227,7 +227,6 @@ function formatDate(value: string): string {
   return new Date(value).toLocaleString('es-MX', {
     dateStyle: 'short',
     timeStyle: 'medium',
-    timeZoneName: 'short',
   })
 }
 
