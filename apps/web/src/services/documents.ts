@@ -27,11 +27,14 @@ export const publishDocument = (doc: KnowledgeDocument, status: KnowledgeDocumen
   apiRequest<KnowledgeDocument>(`/knowledge/documents/${doc.id}/publication`,{
     method:'PATCH',body:JSON.stringify({status,accessRoles,revision:doc.revision}),
   })
-export async function downloadDocument(doc: KnowledgeDocument) {
+export async function downloadDocument(doc: KnowledgeDocument, expectedVersion?: string) {
+  const versionQuery = expectedVersion === undefined
+    ? ''
+    : `?expectedVersion=${encodeURIComponent(expectedVersion)}`
   const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/$/,'')
   let response: Response
   try {
-    response = await fetch(`${base}/knowledge/documents/${doc.id}/content`,{
+    response = await fetch(`${base}/knowledge/documents/${doc.id}/content${versionQuery}`,{
       headers:{Authorization:`Bearer ${getToken() ?? ''}`},cache:'no-store',
     })
   } catch { throw new ApiError('No se pudo conectar con el servidor.',0) }

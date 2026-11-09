@@ -70,9 +70,14 @@ export async function publish(id: number, data: Publication, actor: AuthUser) {
     return publicDocument(after);
   });
 }
-export async function content(id: number, actor: AuthUser) {
+export async function content(id: number, actor: AuthUser, expectedVersion?: string) {
   return repository.transaction(async client => {
     const doc = await accessible(client,id,actor,true);
+    if (expectedVersion !== undefined) {
+      if (doc.status !== 'published' || doc.versionId !== expectedVersion) {
+        throw Errors.conflict('La versión citada ya no está disponible.');
+      }
+    }
     return readDocumentFile(client,doc.fileId);
   });
 }

@@ -7,6 +7,11 @@ export interface AIAnswer {
   text: string;
   /** Ids de artículos de la base de conocimiento usados como fuente. */
   sources: number[];
+  /** Fragmentos que el modelo declara haber utilizado. AIR-003. */
+  citations?: {
+    authorizationId: number;
+    chunkIndex: number;
+  }[];
   /** Siempre true: toda respuesta debe identificarse como generada por IA (NFR-003). */
   aiGenerated: true;
 }

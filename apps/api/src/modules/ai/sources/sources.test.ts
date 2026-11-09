@@ -19,7 +19,16 @@ class SpyProvider implements AIProvider {
   calls: { question: string; context: AIContextItem[] }[] = [];
   async ask(question: string, context: AIContextItem[]): Promise<AIAnswer> {
     this.calls.push({ question, context });
-    return { text: 'respuesta', sources: context.map((c) => c.articleId), aiGenerated: true };
+    return {
+      text: 'respuesta',
+      sources: context.map((c) => c.articleId),
+      citations: context.flatMap((c) =>
+        c.authorizationId !== undefined && c.chunkIndex !== undefined
+          ? [{ authorizationId: c.authorizationId, chunkIndex: c.chunkIndex }]
+          : [],
+      ),
+      aiGenerated: true,
+    };
   }
 }
 
@@ -376,6 +385,139 @@ describe('AIR-002 - authorized knowledge sources', () => {
 
       const audit = await api('get', '/audit-logs?entity=ai_source&action=ai.source_ingestion_failed', managerToken);
       expect(audit.body.data[0]).toMatchObject({ outcome: 'rejected', entityId: auth.id });
+    });
+
+    it('retries a failed ingestion with reviewer permission and preserves authorization', async () => {
+      documents.set(940, {
+        title: 'Manual de recuperacion de acceso',
+        version: 'test-1',
+        hash: 'a'.repeat(64),
+        status: 'published',
+        roles: [],
+      });
+
+      configureDocumentTextExtractor({
+        extract: async () => {
+          throw new Error('Fallo temporal de extraccion.');
+        },
+      });
+
+      const auth = await authorize('document', 940);
+      expect(auth.ingestionStatus).toBe('failed');
+
+      const path = `/ai/sources/${auth.id}/retry-ingestion`;
+
+      expect((await api('post', path, employeeToken, {})).status).toBe(403);
+      expect((await api('post', path, techToken, {})).status).toBe(403);
+
+      configureDocumentTextExtractor({
+        extract: async () =>
+          'Para recuperar acceso al sistema, verificar la cuenta y la conexion al servidor.',
+      });
+
+      const retried = await api('post', path, managerToken, {});
+
+      expect(retried.status).toBe(200);
+      expect(retried.body.data).toMatchObject({
+        id: auth.id,
+        status: 'approved',
+        sourceVersion: 'test-1',
+        ingestionStatus: 'ingested',
+      });
+      expect(retried.body.data.chunkCount).toBeGreaterThan(0);
+
+      const context = await retrieveAuthorizedContext(
+        'recuperar acceso al sistema',
+        manager,
+      );
+
+      expect(context.fragments.some(
+        (fragment) =>
+          fragment.sourceType === 'document' &&
+          fragment.sourceId === 940 &&
+          fragment.sourceVersion === 'test-1',
+      )).toBe(true);
+
+      expect((await api('post', path, managerToken, {})).status).toBe(409);
+    });
+
+    it('invalidates authorization when the PDF version changes before retry', async () => {
+      documents.set(941, {
+        title: 'Manual con cambio de version',
+        version: 'rev-1',
+        hash: 'b'.repeat(64),
+        status: 'published',
+        roles: [],
+      });
+
+      configureDocumentTextExtractor({
+        extract: async () => {
+          throw new Error('Extraccion fallida.');
+        },
+      });
+
+      const auth = await authorize('document', 941);
+      expect(auth.ingestionStatus).toBe('failed');
+
+      documents.set(941, {
+        title: 'Manual con cambio de version',
+        version: 'rev-2',
+        hash: 'c'.repeat(64),
+        status: 'published',
+        roles: [],
+      });
+
+      configureDocumentTextExtractor({
+        extract: async () => 'Contenido actualizado.',
+      });
+
+      const result = await api(
+        'post',
+        `/ai/sources/${auth.id}/retry-ingestion`,
+        managerToken,
+        {},
+      );
+
+      expect(result.status).toBe(409);
+
+      const detail = await api(
+        'get',
+        `/ai/sources/${auth.id}`,
+        managerToken,
+      );
+
+      expect(detail.body.data).toMatchObject({
+        status: 'invalidated',
+        invalidationReason: 'version_changed',
+      });
+    });
+
+    it('does not retry a source that has not been approved', async () => {
+      documents.set(942, {
+        title: 'Manual pendiente de aprobacion',
+        version: 'pending-1',
+        hash: 'd'.repeat(64),
+        status: 'published',
+        roles: [],
+      });
+
+      const requested = await api(
+        'post',
+        '/ai/sources',
+        techToken,
+        { sourceType: 'document', sourceId: 942 },
+      );
+
+      expect(requested.status).toBe(201);
+
+      const result = await api(
+        'post',
+        `/ai/sources/${requested.body.data.id}/retry-ingestion`,
+        managerToken,
+        {},
+      );
+
+      expect(result.status).toBe(409);
     });
 
     it('audits request, approval, ingestion, revocation and invalidation', async () => {

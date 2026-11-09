@@ -13,6 +13,18 @@ export class MockAIProvider implements AIProvider {
     return {
       text: `[MOCK] Suggested answer for: "${question}"`,
       sources: context.filter((c) => c.sourceType !== 'ticket').map((c) => c.articleId),
+      citations: context
+        .filter((c) =>
+          c.sourceType !== 'ticket' &&
+          Number.isSafeInteger(c.authorizationId) &&
+          (c.authorizationId ?? 0) > 0 &&
+          Number.isSafeInteger(c.chunkIndex) &&
+          (c.chunkIndex ?? -1) >= 0
+        )
+        .map((c) => ({
+          authorizationId: c.authorizationId!,
+          chunkIndex: c.chunkIndex!,
+        })),
       aiGenerated: true,
     };
   }
