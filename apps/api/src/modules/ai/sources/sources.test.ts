@@ -396,7 +396,9 @@ describe('AIR-002 - authorized knowledge sources', () => {
 
       expect(answer).toMatchObject({ status: 'insufficient_information', message: INSUFFICIENT_INFORMATION, references: [] });
       expect(provider.calls).toHaveLength(0);
-      expect((await askWithAuthorizedSources('??', technician, provider)).status).toBe('insufficient_information');
+      // FR-013: una consulta sin términos útiles pide más información (sin llamar al modelo)
+      expect((await askWithAuthorizedSources('??', technician, provider)).status).toBe('needs_more_info');
+      expect(provider.calls).toHaveLength(0);
     });
 
     it('treats document text as data: embedded instructions cannot change which sources are used', async () => {

@@ -8,7 +8,8 @@ Permite reconstruir **quién** hizo **qué**, sobre **qué recurso**, **cuándo*
 |---|---|---|
 | `ticket_history` | Evolución del ticket (línea de tiempo). Visible, filtrado, para el solicitante. | Implementado |
 | `audit_log` | Acciones auditables transversales (consulta administrativa). | Implementado |
-| `AIInteraction` / `AIValidation` | Interacción de IA y decisión humana. | **Pendiente (FR-013/FR-015)**: solo hay eventos reservados en el catálogo, sin tablas ni código. |
+| `ai_interactions` (FR-013) | Consulta al asistente: usuario, ticket, condición, fuentes y versiones, duración, fallos. | Implementado ([FR-013](FR-013.md)) |
+| `AIValidation` | Decisión humana sobre una propuesta. | **Pendiente (FR-015)** |
 
 Los logs técnicos (`console.error`) **no** sustituyen estos registros de negocio.
 
@@ -32,7 +33,8 @@ Fuente única: [audit.catalog.ts](../apps/api/src/modules/audit/audit.catalog.ts
 | files | `ticket.attachment_uploaded` |
 | knowledge | `knowledge.created/updated/draft/approved/retired`, `document.created`, `document.metadata.updated`, `document.publication.updated` |
 | ai (AIR-002) | `ai.source_requested`, `.source_approved`, `.source_rejected`, `.source_revoked`, `.source_invalidated`, `.source_ingested`, `.source_ingestion_failed` (rejected) |
-| ai (reservados) | `ai.suggestion_generated`, `.reviewed`, `.approved`, `.rejected`, `.applied`, `ai.request_failed` |
+| ai (FR-013) | `ai.suggestion_generated` (consulta respondida: recomendación, aclaración o información insuficiente), `ai.request_failed` (rejected) |
+| ai (reservados, FR-015) | `ai.suggestion_reviewed`, `.approved`, `.rejected`, `.applied` |
 
 **Cobertura verificada por prueba:** `audit.catalog.test.ts` falla si el código registra una acción fuera del catálogo, si una acción de `ticket_history` no está mapeada (o declarada solo-historial) o si un evento marcado `implemented` no se produce en ningún lugar.
 

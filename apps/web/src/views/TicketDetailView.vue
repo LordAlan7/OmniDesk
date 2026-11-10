@@ -8,6 +8,7 @@ import {
   sessionUser,
 } from '../services/session'
 import TicketTrackingPanel from '../components/TicketTrackingPanel.vue'
+import AiAssistantPanel from '../components/AiAssistantPanel.vue'
 import {
   addInvestigation,
   changeTicketStatus,
@@ -42,6 +43,7 @@ const route = useRoute()
 const router = useRouter()
 
 const ticket = ref<Ticket | null>(null)
+const canUseAssistantOnTicket = computed(() => hasPermission('ai:context:tickets'))
 const candidates = ref<TechnicianCandidate[]>([])
 const history = ref<TicketHistoryEntry[]>([])
 const priorities = ref<Priority[]>([])
@@ -939,6 +941,12 @@ watch(
         </section>
 
         <TicketTrackingPanel :ticket="ticket" @changed="loadTicket" />
+
+        <!-- FR-013: consulta al asistente con el contexto autorizado de este ticket. -->
+        <section v-if="canUseAssistantOnTicket" class="card" data-testid="ticket-assistant">
+          <h2>Asistente técnico</h2>
+          <AiAssistantPanel :ticket-id="ticket.id" :ticket-title="ticket.title" />
+        </section>
 
         <!-- NFR-006 + FR-009: atención del ticket con requisitos de verificación. -->
         <section v-if="canStartWork || canResolve || canReopenWork" class="card technician-actions" :aria-busy="technicianBusy">

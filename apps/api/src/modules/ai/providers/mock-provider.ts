@@ -10,8 +10,13 @@ export class MockAIProvider implements AIProvider {
         aiGenerated: true,
       };
     }
+    const text = `[MOCK] Suggested answer for: "${question}"`;
     return {
-      text: `[MOCK] Suggested answer for: "${question}"`,
+      text,
+      recommendation: text,
+      steps: [],
+      // Solo cita los fragmentos de fuentes (los tickets no son fuentes).
+      citations: context.flatMap((c) => (c.authorizationId === undefined ? [] : [c.authorizationId])),
       sources: context.filter((c) => c.sourceType !== 'ticket').map((c) => c.articleId),
       aiGenerated: true,
     };

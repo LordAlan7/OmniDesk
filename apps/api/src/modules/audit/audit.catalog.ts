@@ -90,14 +90,13 @@ export const AUDIT_EVENTS = {
   'ai.source_ingestion_failed': event('ai_source', 'ai', 'Falló la extracción de la fuente autorizada; no se usa.', { outcome: 'rejected' }),
 
   // IA (FR-013 / FR-015): reservados. Distinguen propuesta, revisión, aprobación y aplicación.
-  'ai.suggestion_generated': event('ai_interaction', 'ai', 'La IA generó una propuesta (AIInteraction).', { implemented: false }),
+  'ai.suggestion_generated': event('ai_interaction', 'ai', 'El asistente respondió una consulta (AIInteraction): recomendación, información insuficiente o aclaración.'),
   'ai.suggestion_reviewed': event('ai_validation', 'ai', 'Una persona revisó la propuesta (AIValidation).', { implemented: false }),
   'ai.suggestion_approved': event('ai_validation', 'ai', 'Una persona aprobó la propuesta.', { implemented: false }),
   'ai.suggestion_rejected': event('ai_validation', 'ai', 'Una persona rechazó la propuesta.', { implemented: false }),
   'ai.suggestion_applied': event('ai_interaction', 'ai', 'La propuesta aprobada se aplicó a un recurso.', { implemented: false }),
   'ai.request_failed': event('ai_interaction', 'ai', 'Error relevante del proveedor de IA (sin claves ni contexto innecesario).', {
     outcome: 'rejected',
-    implemented: false,
   }),
 } as const satisfies Record<string, AuditEventDefinition>;
 

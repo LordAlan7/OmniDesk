@@ -19,3 +19,6 @@ export type { SourceReference } from './sources/sources.types';
 // AIR-008: contexto de ticket filtrado e interacciones con acceso por dueño.
 export { buildTicketContext } from './context/ticket-context';
 export { getInteractionForUser, recordInteraction } from './interactions/interactions';
+export { runAssistantQuery, AI_UNAVAILABLE_MESSAGE } from './assistant.service';
+export type { AssistantResult } from './assistant.service';
+export { AIProviderError } from './providers/ai-provider';

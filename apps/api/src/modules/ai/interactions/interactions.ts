@@ -1,41 +1,25 @@
 import { can, PERMISSIONS } from '../../../shared/authorization';
 import { Errors } from '../../../shared/errors';
 import type { AuthUser } from '../../../shared/types';
+import { interactionsRepository } from './interactions.repository';
+import type { AiInteraction, InteractionAudit, NewInteraction } from './interactions.types';
 import { getSourceReader } from '../sources/source-reader';
 import { sourcesRepository } from '../sources/sources.repository';
-import type { SourceReference } from '../sources/sources.types';
 
 /**
- * Interacciones con el asistente (AIR-008). Cada una pertenece a UN usuario: no hay ámbito compartido
- * mientras no se apruebe una política (por aprobar). FR-013 las creará; aquí solo se define el acceso.
- * Almacén en memoria: la persistencia en PostgreSQL llega con FR-013/AIR-007.
+ * Interacciones con el asistente (AIR-008 / FR-013). Cada una pertenece a UN usuario: no hay ámbito
+ * compartido mientras no se apruebe una política (por aprobar). Persistencia: PostgreSQL (memoria en pruebas).
  */
-export interface AiInteraction {
-  id: number;
-  userId: number;
-  question: string;
-  answer: string;
-  references: SourceReference[];
-  createdAt: string;
-}
+export type { AiInteraction } from './interactions.types';
 
 export type InteractionView =
   | { status: 'available'; interaction: AiInteraction }
   | { status: 'unavailable'; id: number; reason: 'source_withdrawn' | 'source_access_lost'; createdAt: string };
 
-const store = new Map<number, AiInteraction>();
-let nextId = 1;
+export { resetInteractionsRepository as resetInteractions } from './interactions.repository';
 
-export function recordInteraction(input: Omit<AiInteraction, 'id' | 'createdAt'>): AiInteraction {
-  const interaction: AiInteraction = { ...input, id: nextId++, createdAt: new Date().toISOString() };
-  store.set(interaction.id, interaction);
-  return interaction;
-}
-
-export function resetInteractions(): void {
-  store.clear();
-  nextId = 1;
-}
+export const recordInteraction = (data: NewInteraction, audit: InteractionAudit) =>
+  interactionsRepository.create(data, audit);
 
 /**
  * Devuelve la interacción SOLO a su dueño (404 para cualquier otro, sin distinguir). Al reabrirla se
@@ -45,7 +29,7 @@ export function resetInteractions(): void {
 export async function getInteractionForUser(id: number, user: AuthUser): Promise<InteractionView> {
   if (!can(user, PERMISSIONS.AI_INTERACTIONS_READ)) throw Errors.forbidden();
 
-  const interaction = store.get(id);
+  const interaction = await interactionsRepository.findById(id);
   if (!interaction || interaction.userId !== user.id) throw Errors.notFound('Interaction');
 
   for (const reference of interaction.references) {
