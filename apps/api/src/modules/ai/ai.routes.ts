@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { ok, parseId } from '../../shared/http';
 import { PERMISSIONS, requirePermission } from '../../shared/authorization';
-import { authenticate, currentUser } from '../../shared/security/guards';
+  import { authenticate, currentUser } from '../../shared/security/guards';
 import { recordAudit } from '../audit';
 import { Errors } from '../../shared/errors';
 import { askSchema } from './ai.schemas';
@@ -15,11 +15,19 @@ import { aiSourcesRouter } from './sources/sources.routes';
 import {
   recordReview,
   getActiveReviewForInteraction,
+  recordReviewPersisted,
   attachFollowUp,
   canTakeDecision,
 } from './reviews/reviews';
 import { reviewSchema, applySchema } from './reviews/reviews.schemas';
 import { addInvestigation, resolveTicket } from '../tickets';
+import { assertAiValidated } from './validation/guard';
+import * as validationsService from './validation/validations.service';
+import { hashContent } from './validation/validations.service';
+
+
+
+
 
 export const aiRouter = Router();
 const REQUIREMENTS = ['FR-013', 'FR-014', 'FR-015', 'FR-021', 'NFR-003'];
@@ -131,6 +139,12 @@ aiRouter.get('/ai/interactions/:id', authenticate, requirePermission(PERMISSIONS
  *  - ai.suggestion_approved (si approved)
  *  - ai.suggestion_rejected (si rejected)
  */
+
+
+// ... dentro de la ruta de review:
+/**
+ * AIR-004 — revisión humana de la recomendación.
+ */
 aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PERMISSIONS.AI_VALIDATE), async (req, res, next) => {
   try {
     const interactionId = parseId(req.params.id);
@@ -143,7 +157,8 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
         })),
       );
     }
-    const { decision, reason } = parsed.data;
+    const { decision, reason} = parsed.data;
+    const payload = (parsed.data as any).payload;
     const user = currentUser(req);
 
     // El revisor debe ser el dueño de la interacción.
@@ -155,6 +170,22 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
     // D1: sólo Manager puede rechazar.
     canTakeDecision(user, decision);
 
+    // 1. Calculamos el hash del contenido revisado (AIR-006)
+    const contentVersion = hashContent(payload || { interactionId });
+
+    // 2. Guardamos en PostgreSQL (AIR-006)
+    await recordReviewPersisted({
+      interactionId,
+      proposalId: String(interactionId),
+      contentVersion,
+      destinationType: 'ticket',
+      destinationId: interaction.ticketId ?? null,
+      decision,
+      reason,
+      reviewerId: user.id,
+    });
+
+    // 3. Guardamos en memoria (AIR-004)
     const previous = getActiveReviewForInteraction(interactionId);
     const review = recordReview({
       interactionId,
@@ -169,11 +200,7 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
       entity: 'ai_validation',
       entityId: review.id,
       actorId: user.id,
-      metadata: {
-        interactionId,
-        decision,
-        supersedesId: review.supersedesId ?? null,
-      },
+      metadata: { interactionId, decision, supersedesId: review.supersedesId ?? null },
     });
 
     if (decision === 'approved') {
@@ -195,18 +222,15 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
     }
 
     // D2: needs_more_info dispara una nueva consulta con la aclaración.
-    let followUp: { id: number; answer: string; status: string } | null = null;
+    let followUp = null;
     if (decision === 'needs_more_info') {
       const followUpQuestion = `${interaction.question}\n\nAclaración del revisor: ${reason}`;
       const followUpAnswer = await askWithAuthorizedSources(
         followUpQuestion,
         user,
         undefined,
-        interaction.ticketId !== null && interaction.ticketId !== undefined
-          ? { ticketId: interaction.ticketId }
-          : {},
+        interaction.ticketId ? { ticketId: interaction.ticketId } : {},
       );
-
       const followUpInteraction = recordInteraction({
         userId: user.id,
         question: followUpQuestion,
@@ -214,42 +238,106 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
         references: followUpAnswer.references,
         ticketId: interaction.ticketId ?? null,
       });
-
       attachFollowUp(review.id, followUpInteraction.id);
-
-      recordAudit({
-        action: 'ai.suggestion_generated',
-        entity: 'ai_interaction',
-        entityId: followUpInteraction.id,
-        actorId: user.id,
-        metadata: {
-          ticketId: interaction.ticketId ?? null,
-          status: followUpAnswer.status,
-          references: followUpAnswer.references.length,
-          followUpOf: interactionId,
-        },
-      });
-
-      followUp = {
-        id: followUpInteraction.id,
-        answer: followUpAnswer.status === 'answered' ? followUpAnswer.answer : followUpAnswer.message,
-        status: followUpAnswer.status,
-      };
+      followUp = { id: followUpInteraction.id, answer: followUpAnswer.status === 'answered' ? followUpAnswer.answer : followUpAnswer.message, status: followUpAnswer.status };
     }
 
-    ok(
-      res,
-      {
-        id: review.id,
-        interactionId,
-        decision,
-        reviewerId: review.reviewerId,
-        reviewedAt: review.reviewedAt,
-        supersedesId: review.supersedesId ?? null,
-        followUp: followUp,
-      },
-      201,
-    );
+    ok(res, {
+      id: review.id,
+      interactionId,
+      decision,
+      reviewerId: review.reviewerId,
+      reviewedAt: review.reviewedAt,
+      supersedesId: review.supersedesId ?? null,
+      followUp: followUp,
+    }, 201);
+  } catch (cause) {
+    next(cause);
+  }
+});
+
+/**
+ * AIR-004 + AIR-006 + FR-009 — aplicar la recomendación aprobada al ticket.
+ */
+aiRouter.post('/ai/interactions/:id/apply', authenticate, requirePermission(PERMISSIONS.AI_VALIDATE), async (req, res, next) => {
+  try {
+    const interactionId = parseId(req.params.id);
+    const parsed = applySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw Errors.validation(
+        parsed.error.issues.map((issue) => ({
+          field: issue.path.join('.') || 'body',
+          message: issue.message,
+        })),
+      );
+    }
+    const user = currentUser(req);
+
+    const interaction = getInteractionById(interactionId);
+    if (!interaction || interaction.userId !== user.id) {
+      throw Errors.notFound('Interaction');
+    }
+
+    // AIR-006: Validar que exista una validación aprobada vigente en Postgres
+    const { validationId } = await assertAiValidated({
+      interactionId,
+      proposalId: String(interactionId),
+      destinationType: 'ticket',
+      destinationId: interaction.ticketId ?? undefined,
+      payload: parsed.data.content || {},
+      user,
+    });
+
+    // El ticketId del body debe coincidir con el de la interacción (anti-sustitución).
+    if (interaction.ticketId !== null && interaction.ticketId !== undefined) {
+      if (parsed.data.ticketId !== interaction.ticketId) {
+        throw Errors.forbidden('El ticketId no coincide con el de la interacción. No se puede aplicar a otro ticket.');
+      }
+    }
+
+    if (parsed.data.target === 'investigation') {
+      const investigation = await addInvestigation(
+        parsed.data.ticketId,
+        {
+          activity: parsed.data.content.activity,
+          result: parsed.data.content.result,
+          knowledgeArticleId: parsed.data.content.knowledgeArticleId,
+        },
+        user,
+      );
+
+      recordAudit({
+        action: 'ai.suggestion_applied',
+        entity: 'ai_interaction',
+        entityId: interactionId,
+        actorId: user.id,
+        metadata: { reviewId: validationId, ticketId: parsed.data.ticketId, target: 'investigation', investigationId: investigation.id },
+      });
+
+      ok(res, { applied: true, target: 'investigation', investigationId: investigation.id, ticketId: parsed.data.ticketId }, 201);
+    } else {
+      const ticket = await resolveTicket(
+        parsed.data.ticketId,
+        {
+          resolution: parsed.data.content.resolution,
+          resolutionVerification: parsed.data.content.resolutionVerification,
+          rootCause: parsed.data.content.rootCause,
+          observations: parsed.data.content.observations,
+          knowledgeArticleId: parsed.data.content.knowledgeArticleId,
+        },
+        user,
+      );
+
+      recordAudit({
+        action: 'ai.suggestion_applied',
+        entity: 'ai_interaction',
+        entityId: interactionId,
+        actorId: user.id,
+        metadata: { reviewId: validationId, ticketId: parsed.data.ticketId, target: 'resolution', ticketVersion: ticket.version },
+      });
+
+      ok(res, { applied: true, target: 'resolution', ticketId: ticket.id, ticketVersion: ticket.version }, 201);
+    }
   } catch (cause) {
     next(cause);
   }

@@ -14,18 +14,7 @@ import {
 import { hasPermission } from '../services/session'
 
 /**
- * Asistente de IA para soporte (AIR-001) + revisión humana (AIR-004).
- *
- * Decisiones del usuario:
- *  - Panel simple, dentro del detalle del ticket (decisión 2).
- *  - ticketId se pasa automáticamente (decisión 4).
- *  - D1: aprueban Technician/Service Advisor/Manager; sólo Manager rechaza.
- *  - D2: needs_more_info dispara nueva consulta con la aclaración.
- *  - D3: la decisión se puede cambiar (la revisión es mutable).
- *  - D4: para aplicar, la última revisión debe estar 'approved'.
- *
- * AIR-006: cuando se aplica, el contenido se pre-llena con la recomendación
- * y el técnico lo puede editar antes de confirmar (no se guarda sin su visto bueno).
+ * Asistente de IA para soporte (AIR-001) + revisión humana (AIR-004) + AIR-006.
  */
 const props = defineProps<{ ticketId?: number }>()
 
@@ -34,19 +23,17 @@ interface Turn {
   answer: AssistantAnswer | null
   loading: boolean
   error: string
-  /** AIR-004: decisión de revisión vigente sobre esta interacción. */
   reviewDecision?: ReviewDecision
   reviewError?: string
   reviewBusy?: boolean
-  /** Modo de aplicación activo, si lo hay. */
   applyMode?: 'investigation' | 'resolution' | null
   applyError?: string
   applyBusy?: boolean
-  // Formularios de aplicación (pre-llenados, editables).
   applyActivity?: string
   applyResult?: string
   applyResolution?: string
   applyVerification?: string
+  applied?: { destinationId: number, appliedAt: string } | null
 }
 
 const turns = ref<Turn[]>([])
@@ -56,12 +43,7 @@ const error = ref('')
 const listRef = ref<HTMLDivElement | null>(null)
 
 const canValidate = computed(() => hasPermission('ai:validate'))
-const isManager = computed(() => {
-  // Manager es el único rol con ai:sources:review, así que es una prueba
-  // suficiente para mostrar el botón. El backend revalida con la matriz
-  // completa; si la UI se equivoca, el backend niega con 403.
-  return hasPermission('ai:sources:review')
-})
+const isManager = computed(() => hasPermission('ai:sources:review'))
 
 async function submit() {
   const q = question.value.trim()
@@ -118,7 +100,6 @@ async function submitReview(turn: Turn, decision: ReviewDecision) {
     const result = await reviewInteraction(turn.answer!.id, decision, reason.trim())
     turn.reviewDecision = decision
 
-    // D2: si fue needs_more_info, la nueva interacción se agrega como turno nuevo.
     if (decision === 'needs_more_info' && result.followUp) {
       const followUpTurn: Turn = {
         question: `(Aclaración sobre la recomendación #${turn.answer!.id})`,
@@ -145,7 +126,6 @@ async function submitReview(turn: Turn, decision: ReviewDecision) {
 }
 
 function openApplyMode(turn: Turn, mode: 'investigation' | 'resolution') {
-  // Pre-llenado con la recomendación (AIR-006 + D5).
   const answer = turn.answer!.answer
   const refs = turn.answer!.references
     .map((r) => `${r.sourceType === 'article' ? 'Artículo' : 'Documento'} #${r.sourceId} v${r.sourceVersion} — ${r.title}`)
@@ -158,7 +138,7 @@ function openApplyMode(turn: Turn, mode: 'investigation' | 'resolution') {
     turn.applyResult = `${answer}${refs ? `\n\nFuentes: ${refs}` : ''}`
   } else {
     turn.applyResolution = answer
-    turn.applyVerification = '' // El técnico debe llenarlo (FR-009 lo exige)
+    turn.applyVerification = ''
   }
   scrollToEnd()
 }
@@ -183,15 +163,14 @@ async function confirmApply(turn: Turn) {
         activity: turn.applyActivity ?? '',
         result: turn.applyResult ?? '',
       }
-      await applyInteraction(turn.answer!.id, 'investigation', props.ticketId, content)
+      const res = await applyInteraction(turn.answer!.id, 'investigation', props.ticketId, content)
+      turn.applied = { destinationId: props.ticketId, appliedAt: new Date().toISOString() }
       turn.applyMode = null
     } else if (turn.applyMode === 'resolution') {
       const content: ApplyResolutionContent = {
         resolution: turn.applyResolution ?? '',
         resolutionVerification: turn.applyVerification ?? '',
       }
-      // expectedVersion: el backend lo exige para resolver (control de concurrencia
-      // de FR-009). Pedimos al usuario que lo consulte en el detalle del ticket.
       const versionStr = window.prompt(
         'Versión actual del ticket (necesaria para resolver). Revísala en la sección "Atención del ticket".',
       )
@@ -201,7 +180,8 @@ async function confirmApply(turn: Turn) {
         turn.applyBusy = false
         return
       }
-      await applyInteraction(turn.answer!.id, 'resolution', props.ticketId, content, expectedVersion)
+      const res = await applyInteraction(turn.answer!.id, 'resolution', props.ticketId, content, expectedVersion)
+      turn.applied = { destinationId: props.ticketId, appliedAt: new Date().toISOString() }
       turn.applyMode = null
     }
   } catch (cause) {
@@ -217,6 +197,12 @@ async function scrollToEnd() {
   if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
 }
 
+function formatDate(dateString: string) {
+  if (!dateString) return ''
+  return new Date(dateString).toLocaleDateString('es-MX', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  })
+}
 </script>
 
 <template>
@@ -248,67 +234,69 @@ async function scrollToEnd() {
         <div v-else-if="turn.answer" class="bubble ai">
           <strong>Asistente (IA):</strong>
           <p class="ai-text">{{ turn.answer.answer }}</p>
+          
+          <!-- 1. Origen IA (NFR-003) -->
+          <div class="mt-3 mb-2 flex flex-col gap-2">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 w-fit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+              </svg>
+              Generado por IA
+            </span>
+
+            <!-- 2. Estado de la revisión (AIR-004 / AIR-006) -->
+            <div v-if="turn.reviewDecision" class="flex items-center gap-2 text-sm">
+              <span v-if="turn.reviewDecision === 'approved'" class="text-green-700 font-medium flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                Confirmado. Listo para aplicar.
+              </span>
+              <span v-else-if="turn.reviewDecision === 'rejected'" class="text-red-700 font-medium flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                Rechazado
+              </span>
+              <span v-else-if="turn.reviewDecision === 'needs_more_info'" class="text-yellow-700 font-medium flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                Requiere más información
+              </span>
+            </div>
+            
+            <!-- 3. Estado de Aplicado (AIR-006) -->
+            <div v-if="turn.applied" class="text-sm text-gray-700 bg-gray-50 p-2.5 rounded-md border border-gray-200 flex items-center gap-2 w-fit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500">
+                <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+              </svg>
+              <span><strong>Aplicado</strong> al ticket #{{ turn.applied.destinationId }} el {{ formatDate(turn.applied.appliedAt) }}</span>
+            </div>
+          </div>
+
           <p v-if="turn.answer.status === 'insufficient_information'" class="hint">
             No se encontraron fuentes autorizadas suficientes para responder.
           </p>
           <p v-if="props.ticketId" class="hint">
             Contexto usado: ticket #{{ props.ticketId }}.
           </p>
+          
           <AIReferences :references="turn.answer.references" />
-          <p class="ai-disclaimer">⚠ Respuesta generada por IA. Revisa antes de aplicar.</p>
 
-          <!-- AIR-004: acciones de revisión. Sólo para usuarios con ai:validate.
-               Abrir la recomendación NO la aprueba; se exige acción explícita + motivo. -->
+          <!-- Acciones de revisión -->
           <div v-if="canValidate && !turn.reviewDecision && turn.answer.status === 'answered'" class="review-actions">
-            <button
-              type="button"
-              class="secondary"
-              :disabled="!!turn.reviewBusy"
-              @click="submitReview(turn, 'approved')"
-            >Aprobar recomendación</button>
-            <button
-              type="button"
-              class="secondary"
-              :disabled="!!turn.reviewBusy"
-              @click="submitReview(turn, 'needs_more_info')"
-            >Solicitar más información</button>
-            <button
-              v-if="isManager"
-              type="button"
-              class="secondary danger"
-              :disabled="!!turn.reviewBusy"
-              @click="submitReview(turn, 'rejected')"
-            >Rechazar</button>
+            <button type="button" class="secondary" :disabled="!!turn.reviewBusy" @click="submitReview(turn, 'approved')">Aprobar recomendación</button>
+            <button type="button" class="secondary" :disabled="!!turn.reviewBusy" @click="submitReview(turn, 'needs_more_info')">Solicitar más información</button>
+            <button v-if="isManager" type="button" class="secondary danger" :disabled="!!turn.reviewBusy" @click="submitReview(turn, 'rejected')">Rechazar</button>
           </div>
 
           <p v-if="turn.reviewError" class="error" role="alert">{{ turn.reviewError }}</p>
 
-          <!-- Confirmación visible de la decisión tomada. -->
-          <p v-if="turn.reviewDecision === 'approved'" class="review-status approved">
-            ✅ Recomendación aprobada. Ya puedes aplicarla al ticket.
-          </p>
-          <p v-else-if="turn.reviewDecision === 'rejected'" class="review-status rejected">
-            ❌ Recomendación rechazada.
-          </p>
-          <p v-else-if="turn.reviewDecision === 'needs_more_info'" class="review-status needs-info">
-            ℹ Se solicitó más información. La nueva consulta aparece abajo.
-          </p>
-
-          <!-- AIR-004 + AIR-006: aplicar la recomendación aprobada. El contenido
-               se pre-llena con la respuesta y el técnico lo puede editar. -->
-          <div v-if="turn.reviewDecision === 'approved' && !turn.applyMode" class="apply-actions">
-            <button
-              v-if="props.ticketId"
-              type="button"
-              class="secondary"
-              @click="openApplyMode(turn, 'investigation')"
-            >Aplicar a investigación</button>
-            <button
-              v-if="props.ticketId"
-              type="button"
-              class="secondary"
-              @click="openApplyMode(turn, 'resolution')"
-            >Aplicar a resolución</button>
+          <!-- Aplicar -->
+          <div v-if="turn.reviewDecision === 'approved' && !turn.applyMode && !turn.applied" class="apply-actions">
+            <button v-if="props.ticketId" type="button" class="secondary" @click="openApplyMode(turn, 'investigation')">Aplicar a investigación</button>
+            <button v-if="props.ticketId" type="button" class="secondary" @click="openApplyMode(turn, 'resolution')">Aplicar a resolución</button>
           </div>
 
           <div v-if="turn.applyMode === 'investigation'" class="apply-form">
@@ -383,11 +371,6 @@ async function scrollToEnd() {
 .review-actions { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .review-actions button { padding: 8px 14px; font-size: 14px; }
 .review-actions button.danger { border-color: #a52121; background: #a52121; color: white; }
-
-.review-status { margin-top: 8px; padding: 8px 12px; border-radius: 6px; font-size: 14px; }
-.review-status.approved { background: #e7f6ed; color: #17663a; }
-.review-status.rejected { background: #fff0f0; color: #a52121; }
-.review-status.needs-info { background: #eef2ff; color: #2457d6; }
 
 .apply-actions { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .apply-actions button { padding: 8px 14px; font-size: 14px; }
