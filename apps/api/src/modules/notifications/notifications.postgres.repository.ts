@@ -104,8 +104,9 @@ export const postgresNotificationsRepository = {
   async unreadCount(userId: number, accessibleTicketIds: number[] | null): Promise<number> {
     const result = await getPool().query<{ count: string }>(
       `SELECT count(*) AS count FROM notifications
-       WHERE user_id = $1 AND read = FALSE ${ACCESS_CLAUSE}`,
-      [userId, false, accessibleTicketIds],
+       WHERE user_id = $1 AND read = FALSE
+       AND ($2::int[] IS NULL OR ticket_id = ANY($2) OR ticket_id IS NULL)`,
+      [userId, accessibleTicketIds],
     );
     return Number(result.rows[0]?.count ?? 0);
   },

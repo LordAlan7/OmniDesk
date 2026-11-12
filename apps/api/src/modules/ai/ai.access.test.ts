@@ -7,6 +7,7 @@ import { buildTicketContext } from './context/ticket-context';
 import { getInteractionForUser, recordInteraction, resetInteractions } from './interactions/interactions';
 import type { AIAnswer, AIContextItem, AIProvider } from './providers/ai-provider';
 import { retrieveAuthorizedContext } from './sources/retrieval';
+import { sourcesRepository } from './sources/sources.repository';
 
 const user = (id: number, roles: Role[]): AuthUser => ({ id, email: `u${id}@company.com`, name: `u${id}`, roles });
 const employee = user(1, ['Employee']);
@@ -183,11 +184,11 @@ describe('AIR-008 - access control for the assistant', () => {
   });
 
   describe('interactions and history', () => {
-    const reference = (authorizationId: number, sourceId: number) => ({
+    const reference = (authorizationId: number, sourceId: number, sourceVersion: string) => ({
       authorizationId,
       sourceType: 'article' as const,
       sourceId,
-      sourceVersion: '1',
+      sourceVersion,
       title: 'Fuente',
       chunkIndex: 0,
     });
@@ -202,11 +203,16 @@ describe('AIR-008 - access control for the assistant', () => {
 
     it('does not show stored text again when a referenced source was withdrawn', async () => {
       const { authorizationId, articleId } = await authorizedArticle('Lector de código', 'Limpiar la lente del lector de código.');
+      const approvedSource = await sourcesRepository.findById(authorizationId);
+
+      if (!approvedSource || approvedSource.status !== 'approved') {
+        throw new Error('La fuente no está autorizada para esta prueba.');
+      }
       const stored = recordInteraction({
         userId: technician.id,
         question: 'lector',
         answer: 'texto generado con contenido que luego se retira',
-        references: [reference(authorizationId, articleId)],
+        references: [reference(authorizationId, articleId, approvedSource.sourceVersion)],
       });
 
       expect(await getInteractionForUser(stored.id, technician)).toMatchObject({ status: 'available' });

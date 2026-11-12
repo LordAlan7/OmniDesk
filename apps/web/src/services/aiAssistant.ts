@@ -9,7 +9,21 @@ import { apiPage } from '@/api/http'
  * lo decide el backend.
  */
 
-export type AssistantStatus = 'answered' | 'insufficient_information'
+export type AssistantStatus = 'answered' | 'insufficient_information' | 'needs_more_info' | 'out_of_scope'
+export type AITransparencyStatus =
+  | 'supported'
+  | 'needs_more_info'
+  | 'insufficient_support'
+  | 'out_of_scope'
+  | 'technical_error'
+
+export interface AITransparency {
+  status: AITransparencyStatus
+  title: string
+  message: string
+  requiresHumanReview: boolean
+  missingInformation: string[]
+}
 
 export interface AssistantReference {
   authorizationId: number
@@ -26,6 +40,7 @@ export interface AssistantAnswer {
   answer: string
   references: AssistantReference[]
   aiGenerated: true
+  transparency?: AITransparency
   createdAt: string
 }
 
@@ -64,7 +79,7 @@ export interface ReviewResult {
   reviewerId: number
   reviewedAt: string
   supersedesId: number | null
-  followUp: { id: number; answer: string; status: string } | null
+  followUp: AssistantAnswer | null
 }
 
 /**

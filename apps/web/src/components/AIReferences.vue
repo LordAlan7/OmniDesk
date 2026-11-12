@@ -142,8 +142,8 @@ async function openReference(reference: GroupedReference) {
         <p>Versión citada: {{ reference.sourceVersion }}</p>
 
         <p>
-          Fragmentos:
-          {{ [...reference.chunks].sort((a, b) => a - b).join(', ') }}
+          Fragmentos citados:
+          {{ [...reference.chunks].sort((a, b) => a - b).map((index) => index + 1).join(', ') }}
         </p>
 
         <p class="reference-note">

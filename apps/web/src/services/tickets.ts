@@ -173,7 +173,7 @@ export async function getAvailableTransitions(
   ticketId: number,
 ): Promise<AvailableTransition[]> {
   const response = await apiRequest<AvailableTransition[]>(
-    `/tickets/${ticketId}/available-transitions`,
+    `/tickets/${ticketId}/transitions`,
   )
 
   return response.data

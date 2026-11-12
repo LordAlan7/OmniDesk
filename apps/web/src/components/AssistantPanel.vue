@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AIReferences from './AIReferences.vue'
+import AITransparency from './AITransparency.vue'
 import { computed, nextTick, ref } from 'vue'
 import { ApiError } from '@/api/http'
 import {
@@ -7,6 +8,7 @@ import {
   reviewInteraction,
   applyInteraction,
   type AssistantAnswer,
+  type AITransparency as AITransparencyInfo,
   type ReviewDecision,
   type ApplyInvestigationContent,
   type ApplyResolutionContent,
@@ -29,11 +31,19 @@ import { hasPermission } from '../services/session'
  */
 const props = defineProps<{ ticketId?: number }>()
 
+const technicalErrorTransparency: AITransparencyInfo = {
+  status: 'technical_error',
+  title: 'Error técnico del asistente',
+  message: 'No se pudo completar la consulta. No se obtuvo una recomendación ni un diagnóstico verificado.',
+  requiresHumanReview: false,
+  missingInformation: [],
+}
 interface Turn {
   question: string
   answer: AssistantAnswer | null
   loading: boolean
   error: string
+  technicalError?: boolean
   /** AIR-004: decisión de revisión vigente sobre esta interacción. */
   reviewDecision?: ReviewDecision
   reviewError?: string
@@ -88,7 +98,13 @@ async function submit() {
     turn.loading = false
   } catch (cause) {
     turn.loading = false
-    turn.error = cause instanceof ApiError ? cause.message : 'No se pudo obtener respuesta del asistente.'
+    turn.technicalError =
+      !(cause instanceof ApiError) ||
+      cause.kind === 'network' ||
+      cause.kind === 'server'
+    turn.error = cause instanceof ApiError
+      ? cause.message
+      : 'No se pudo obtener respuesta del asistente.'
   } finally {
     sending.value = false
     await scrollToEnd()
@@ -122,14 +138,7 @@ async function submitReview(turn: Turn, decision: ReviewDecision) {
     if (decision === 'needs_more_info' && result.followUp) {
       const followUpTurn: Turn = {
         question: `(Aclaración sobre la recomendación #${turn.answer!.id})`,
-        answer: {
-          id: result.followUp.id,
-          status: result.followUp.status as 'answered' | 'insufficient_information',
-          answer: result.followUp.answer,
-          references: [],
-          aiGenerated: true,
-          createdAt: new Date().toISOString(),
-        },
+        answer: result.followUp,
         loading: false,
         error: '',
       }
@@ -243,11 +252,22 @@ async function scrollToEnd() {
         <div v-else-if="turn.error" class="bubble ai error" role="alert">
           <strong>Asistente (IA):</strong>
           <p>{{ turn.error }}</p>
+          <AITransparency
+            v-if="turn.technicalError"
+            :transparency="technicalErrorTransparency"
+            status="technical_error"
+            :reference-count="0"
+          />
         </div>
 
         <div v-else-if="turn.answer" class="bubble ai">
           <strong>Asistente (IA):</strong>
           <p class="ai-text">{{ turn.answer.answer }}</p>
+          <AITransparency
+            :transparency="turn.answer.transparency"
+            :status="turn.answer.status"
+            :reference-count="turn.answer.references.length"
+          />
           <p v-if="turn.answer.status === 'insufficient_information'" class="hint">
             No se encontraron fuentes autorizadas suficientes para responder.
           </p>
@@ -255,11 +275,11 @@ async function scrollToEnd() {
             Contexto usado: ticket #{{ props.ticketId }}.
           </p>
           <AIReferences :references="turn.answer.references" />
-          <p class="ai-disclaimer">⚠ Respuesta generada por IA. Revisa antes de aplicar.</p>
+          <p v-if="turn.answer.status === 'answered' && turn.answer.transparency?.status === 'supported' && turn.answer.references.length > 0" class="ai-disclaimer">⚠ Respuesta generada por IA. Revisa antes de aplicar.</p>
 
           <!-- AIR-004: acciones de revisión. Sólo para usuarios con ai:validate.
                Abrir la recomendación NO la aprueba; se exige acción explícita + motivo. -->
-          <div v-if="canValidate && !turn.reviewDecision && turn.answer.status === 'answered'" class="review-actions">
+          <div v-if="canValidate && !turn.reviewDecision && turn.answer.status === 'answered' && turn.answer.transparency?.status === 'supported' && turn.answer.references.length > 0" class="review-actions">
             <button
               type="button"
               class="secondary"

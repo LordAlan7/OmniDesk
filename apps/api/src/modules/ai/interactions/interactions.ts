@@ -60,14 +60,102 @@ export async function getInteractionForUser(id: number, user: AuthUser): Promise
 
   for (const reference of interaction.references) {
     const authorization = await sourcesRepository.findById(reference.authorizationId);
-    if (!authorization || authorization.status !== 'approved') {
+    if (
+      !authorization ||
+      authorization.status !== 'approved' ||
+      authorization.sourceType !== reference.sourceType ||
+      authorization.sourceId !== reference.sourceId ||
+      authorization.sourceVersion !== reference.sourceVersion
+    ) {
       return { status: 'unavailable', id, reason: 'source_withdrawn', createdAt: interaction.createdAt };
     }
     const snapshot = await getSourceReader().read(reference.sourceType, reference.sourceId, user);
     if (!snapshot?.visibleToUser) {
       return { status: 'unavailable', id, reason: 'source_access_lost', createdAt: interaction.createdAt };
     }
+
+    if (
+      !snapshot.eligible ||
+      snapshot.type !== reference.sourceType ||
+      snapshot.id !== reference.sourceId ||
+      snapshot.version !== authorization.sourceVersion ||
+      snapshot.contentHash !== authorization.contentHash
+    ) {
+      return {
+        status: 'unavailable',
+        id,
+        reason: 'source_withdrawn',
+        createdAt: interaction.createdAt,
+      };
+    }
   }
 
   return { status: 'available', interaction };
+}
+
+/**
+ * NFR-003: comprueba que una recomendación conserve respaldo autorizado.
+ * Debe ejecutarse antes de aprobar o aplicar una recomendación.
+ */
+export async function assertInteractionCurrentlySupported(
+  interaction: AiInteraction,
+  user: AuthUser,
+): Promise<void> {
+  if (interaction.userId !== user.id) {
+    throw Errors.notFound('Interaction');
+  }
+
+  if (interaction.references.length === 0) {
+    throw Errors.invalidState(
+      'La recomendación no tiene referencias verificadas y no puede aprobarse ni aplicarse.',
+    );
+  }
+
+  const reader = getSourceReader();
+
+  for (const reference of interaction.references) {
+    const authorization = await sourcesRepository.findById(
+      reference.authorizationId,
+    );
+
+    if (!authorization || authorization.status !== 'approved') {
+      throw Errors.invalidState(
+        'El respaldo autorizado de la recomendación ya no está disponible. Solicita una nueva consulta.',
+      );
+    }
+
+    // NFR-003: la referencia debe coincidir con la autorización.
+    if (
+      authorization.sourceType !== reference.sourceType ||
+      authorization.sourceId !== reference.sourceId ||
+      authorization.sourceVersion !== reference.sourceVersion
+    ) {
+      throw Errors.invalidState(
+        'La referencia no coincide con la fuente y versión autorizadas. Solicita una nueva consulta.',
+      );
+    }
+
+    const snapshot = await reader.read(
+      reference.sourceType,
+      reference.sourceId,
+      user,
+    );
+
+    if (!snapshot?.visibleToUser) {
+      throw Errors.invalidState(
+        'No se puede verificar el acceso a las fuentes de esta recomendación.',
+      );
+    }
+
+    // NFR-003: comprobar versión, contenido y elegibilidad.
+    if (
+      !snapshot.eligible ||
+      snapshot.version !== authorization.sourceVersion ||
+      snapshot.contentHash !== authorization.contentHash
+    ) {
+      throw Errors.invalidState(
+        'La fuente cambió de versión, contenido o estado. Solicita una nueva consulta.',
+      );
+    }
+  }
 }

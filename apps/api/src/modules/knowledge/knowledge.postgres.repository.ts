@@ -36,12 +36,12 @@ function toArticle(row: ArticleRow): KnowledgeArticle {
   };
 }
 
-const SELECT = `SELECT * FROM knowledge_articles`;
+const SELECT = `SELECT * FROM support_knowledge_articles`;
 
 export const postgresKnowledgeRepository = {
   async create(data: { title: string; problemDescription: string; solution: string; categoryId: number; authorId: number; isRecurringProblem?: boolean; symptoms?: string; verification?: string }): Promise<KnowledgeArticle> {
     const result = await getPool().query<ArticleRow>(
-      `INSERT INTO knowledge_articles (title, problem_description, solution, category_id, author_id, status, version, is_recurring_problem, symptoms, verification)
+      `INSERT INTO support_knowledge_articles (title, problem_description, solution, category_id, author_id, status, version, is_recurring_problem, symptoms, verification)
        VALUES ($1, $2, $3, $4, $5, 'draft', 1, $6, $7, $8) RETURNING *`,
       [data.title, data.problemDescription, data.solution, data.categoryId, data.authorId, data.isRecurringProblem ?? false, data.symptoms ?? null, data.verification ?? null]
     );
@@ -77,7 +77,7 @@ export const postgresKnowledgeRepository = {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     
-    const countResult = await getPool().query<{ count: string }>(`SELECT COUNT(*) FROM knowledge_articles ${where}`, values);
+    const countResult = await getPool().query<{ count: string }>(`SELECT COUNT(*) FROM support_knowledge_articles ${where}`, values);
     const total = parseInt(countResult.rows[0]!.count, 10);
 
     const offset = (page - 1) * limit;
@@ -92,7 +92,7 @@ export const postgresKnowledgeRepository = {
 
   async save(article: KnowledgeArticle): Promise<KnowledgeArticle> {
     const result = await getPool().query<ArticleRow>(
-      `UPDATE knowledge_articles
+      `UPDATE support_knowledge_articles
        SET title = $1, problem_description = $2, solution = $3, category_id = $4, status = $5, 
            is_recurring_problem = $6, symptoms = $7, verification = $8, updated_at = NOW(), version = version + 1
        WHERE id = $9 RETURNING *`,

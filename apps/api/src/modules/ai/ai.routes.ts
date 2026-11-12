@@ -6,10 +6,12 @@ import { recordAudit } from '../audit';
 import { Errors } from '../../shared/errors';
 import { askSchema } from './ai.schemas';
 import { askWithAuthorizedSources, INSUFFICIENT_INFORMATION } from './ai.service';
+import { transparencyForAuthorizedAnswer } from './ai.transparency';
 import {
   getInteractionForUser,
   recordInteraction,
   getInteractionById,
+  assertInteractionCurrentlySupported,
 } from './interactions/interactions';
 import { aiSourcesRouter } from './sources/sources.routes';
 import {
@@ -93,6 +95,7 @@ aiRouter.post('/ai/ask', authenticate, requirePermission(PERMISSIONS.AI_QUERY), 
         answer: answer.status === 'answered' ? answer.answer : answer.message,
         references: answer.references,
         aiGenerated: true,
+        transparency: transparencyForAuthorizedAnswer(answer),
         createdAt: interaction.createdAt,
       },
       201,
@@ -155,6 +158,10 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
     // D1: sólo Manager puede rechazar.
     canTakeDecision(user, decision);
 
+    if (decision === 'approved') {
+      await assertInteractionCurrentlySupported(interaction, user);
+    }
+
     const previous = getActiveReviewForInteraction(interactionId);
     const review = recordReview({
       interactionId,
@@ -195,7 +202,15 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
     }
 
     // D2: needs_more_info dispara una nueva consulta con la aclaración.
-    let followUp: { id: number; answer: string; status: string } | null = null;
+    let followUp: {
+      id: number;
+      answer: string;
+      status: Awaited<ReturnType<typeof askWithAuthorizedSources>>['status'];
+      references: Awaited<ReturnType<typeof askWithAuthorizedSources>>['references'];
+      aiGenerated: true;
+      transparency: ReturnType<typeof transparencyForAuthorizedAnswer>;
+      createdAt: string;
+    } | null = null;
     if (decision === 'needs_more_info') {
       const followUpQuestion = `${interaction.question}\n\nAclaración del revisor: ${reason}`;
       const followUpAnswer = await askWithAuthorizedSources(
@@ -234,6 +249,10 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
         id: followUpInteraction.id,
         answer: followUpAnswer.status === 'answered' ? followUpAnswer.answer : followUpAnswer.message,
         status: followUpAnswer.status,
+        references: followUpAnswer.references,
+        aiGenerated: true,
+        transparency: transparencyForAuthorizedAnswer(followUpAnswer),
+        createdAt: followUpInteraction.createdAt,
       };
     }
 
@@ -293,6 +312,8 @@ aiRouter.post('/ai/interactions/:id/apply', authenticate, requirePermission(PERM
     }
 
     // La última revisión debe ser 'approved'.
+    await assertInteractionCurrentlySupported(interaction, user);
+
     const review = getActiveReviewForInteraction(interactionId);
     if (!review || review.decision !== 'approved') {
       throw Errors.invalidState(
