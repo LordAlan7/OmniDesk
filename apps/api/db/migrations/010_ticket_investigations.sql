@@ -1,6 +1,6 @@
 -- FR-009: Investigación, resolución y cierre de tickets.
 -- Requiere: 001_init.sql (tickets, ticket_history), 003_tickets_constraints.sql (version),
---           004_ticket_assignment.sql (ticket_history.reason), 006_knowledge_articles.sql (knowledge_articles).
+--           004_ticket_assignment.sql (ticket_history.reason), 006_knowledge_articles.sql (support_knowledge_articles).
 -- Idempotente.
 
 BEGIN;
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS ticket_investigations (
   -- NO se puede borrar. Para sacarlo de circulación se retira con status='retired'
   -- vía FR-011 (conserva el registro y la trazabilidad).
   -- La validez del estado "approved" al momento de GUARDAR se verifica en la app.
-  knowledge_article_id  INT REFERENCES knowledge_articles(id) ON DELETE RESTRICT,
+  knowledge_article_id  INT REFERENCES support_knowledge_articles(id) ON DELETE RESTRICT,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -49,7 +49,7 @@ ALTER TABLE tickets
   ADD COLUMN IF NOT EXISTS resolution_verification TEXT,
   ADD COLUMN IF NOT EXISTS root_cause              TEXT,
   ADD COLUMN IF NOT EXISTS resolution_observations TEXT,
-  ADD COLUMN IF NOT EXISTS knowledge_article_id    INT REFERENCES knowledge_articles(id) ON DELETE RESTRICT;
+  ADD COLUMN IF NOT EXISTS knowledge_article_id    INT REFERENCES support_knowledge_articles(id) ON DELETE RESTRICT;
 
 -- Restricción condicional (NFR-010): si está resuelto, debe tener comprobación del resultado.
 -- `resolution` ya está cubierto por tickets_resolved_requires_resolution.

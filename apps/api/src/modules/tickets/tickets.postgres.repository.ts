@@ -570,7 +570,7 @@ export const postgresTicketsRepository = {
         `SELECT i.*, u.name AS author_name, ka.title AS knowledge_article_title
          FROM ticket_investigations i
          JOIN users u ON u.id = i.author_id
-         LEFT JOIN knowledge_articles ka ON ka.id = i.knowledge_article_id
+         LEFT JOIN support_knowledge_articles ka ON ka.id = i.knowledge_article_id
          WHERE i.id = $1`,
         [inserted.id],
       );
@@ -590,7 +590,7 @@ export const postgresTicketsRepository = {
       `SELECT i.*, u.name AS author_name, ka.title AS knowledge_article_title
        FROM ticket_investigations i
        JOIN users u ON u.id = i.author_id
-       LEFT JOIN knowledge_articles ka ON ka.id = i.knowledge_article_id
+       LEFT JOIN support_knowledge_articles ka ON ka.id = i.knowledge_article_id
        WHERE i.ticket_id = $1
        ORDER BY i.id`,
       [ticketId],

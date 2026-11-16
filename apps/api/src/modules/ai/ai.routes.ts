@@ -6,10 +6,12 @@ import { recordAudit } from '../audit';
 import { Errors } from '../../shared/errors';
 import { askSchema } from './ai.schemas';
 import { askWithAuthorizedSources, INSUFFICIENT_INFORMATION } from './ai.service';
+import { transparencyForAuthorizedAnswer } from './ai.transparency';
 import {
   getInteractionForUser,
   recordInteraction,
   getInteractionById,
+  assertInteractionCurrentlySupported,
 } from './interactions/interactions';
 import { aiSourcesRouter } from './sources/sources.routes';
 import {
@@ -101,6 +103,7 @@ aiRouter.post('/ai/ask', authenticate, requirePermission(PERMISSIONS.AI_QUERY), 
         answer: answer.status === 'answered' ? answer.answer : answer.message,
         references: answer.references,
         aiGenerated: true,
+        transparency: transparencyForAuthorizedAnswer(answer),
         createdAt: interaction.createdAt,
       },
       201,
@@ -170,22 +173,10 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
     // D1: sólo Manager puede rechazar.
     canTakeDecision(user, decision);
 
-    // 1. Calculamos el hash del contenido revisado (AIR-006)
-    const contentVersion = hashContent(payload || { interactionId });
+    if (decision === 'approved') {
+      await assertInteractionCurrentlySupported(interaction, user);
+    }
 
-    // 2. Guardamos en PostgreSQL (AIR-006)
-    await recordReviewPersisted({
-      interactionId,
-      proposalId: String(interactionId),
-      contentVersion,
-      destinationType: 'ticket',
-      destinationId: interaction.ticketId ?? null,
-      decision,
-      reason,
-      reviewerId: user.id,
-    });
-
-    // 3. Guardamos en memoria (AIR-004)
     const previous = getActiveReviewForInteraction(interactionId);
     const review = recordReview({
       interactionId,
@@ -222,7 +213,15 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
     }
 
     // D2: needs_more_info dispara una nueva consulta con la aclaración.
-    let followUp = null;
+    let followUp: {
+      id: number;
+      answer: string;
+      status: Awaited<ReturnType<typeof askWithAuthorizedSources>>['status'];
+      references: Awaited<ReturnType<typeof askWithAuthorizedSources>>['references'];
+      aiGenerated: true;
+      transparency: ReturnType<typeof transparencyForAuthorizedAnswer>;
+      createdAt: string;
+    } | null = null;
     if (decision === 'needs_more_info') {
       const followUpQuestion = `${interaction.question}\n\nAclaración del revisor: ${reason}`;
       const followUpAnswer = await askWithAuthorizedSources(
@@ -239,7 +238,29 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
         ticketId: interaction.ticketId ?? null,
       });
       attachFollowUp(review.id, followUpInteraction.id);
-      followUp = { id: followUpInteraction.id, answer: followUpAnswer.status === 'answered' ? followUpAnswer.answer : followUpAnswer.message, status: followUpAnswer.status };
+
+      recordAudit({
+        action: 'ai.suggestion_generated',
+        entity: 'ai_interaction',
+        entityId: followUpInteraction.id,
+        actorId: user.id,
+        metadata: {
+          ticketId: interaction.ticketId ?? null,
+          status: followUpAnswer.status,
+          references: followUpAnswer.references.length,
+          followUpOf: interactionId,
+        },
+      });
+
+      followUp = {
+        id: followUpInteraction.id,
+        answer: followUpAnswer.status === 'answered' ? followUpAnswer.answer : followUpAnswer.message,
+        status: followUpAnswer.status,
+        references: followUpAnswer.references,
+        aiGenerated: true,
+        transparency: transparencyForAuthorizedAnswer(followUpAnswer),
+        createdAt: followUpInteraction.createdAt,
+      };
     }
 
     ok(res, {
@@ -381,6 +402,8 @@ aiRouter.post('/ai/interactions/:id/apply', authenticate, requirePermission(PERM
     }
 
     // La última revisión debe ser 'approved'.
+    await assertInteractionCurrentlySupported(interaction, user);
+
     const review = getActiveReviewForInteraction(interactionId);
     if (!review || review.decision !== 'approved') {
       throw Errors.invalidState(

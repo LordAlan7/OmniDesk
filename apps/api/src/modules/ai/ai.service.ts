@@ -8,12 +8,15 @@ import { retrieveAuthorizedContext } from './sources/retrieval';
 import { frameAsData } from './sources/sources.policy';
 import type { SourceReference } from './sources/sources.types';
 import { validateCitedReferences } from './ai.citations';
+import { screenSupportQuestion } from './ai.question-classifier';
 
 export const INSUFFICIENT_INFORMATION =
   'No hay información autorizada suficiente para responder esta consulta.';
 
 export type AuthorizedAnswer =
   | { status: 'insufficient_information'; message: string; references: []; aiGenerated: true }
+  | { status: 'needs_more_info'; message: string; missingInformation: string[]; references: []; aiGenerated: true }
+  | { status: 'out_of_scope'; message: string; references: []; aiGenerated: true }
   | { status: 'answered'; answer: string; references: SourceReference[]; aiGenerated: true };
 
 /**
@@ -31,6 +34,30 @@ export async function askWithAuthorizedSources(
   if (!can(user, PERMISSIONS.AI_QUERY)) throw Errors.forbidden();
   const ticketContext =
     options.ticketId === undefined ? undefined : await buildTicketContext(options.ticketId, user);
+
+  const screening = screenSupportQuestion(
+    question,
+    options.ticketId !== undefined,
+  );
+
+  if (screening.kind === 'needs_more_info') {
+    return {
+      status: 'needs_more_info',
+      message: 'Necesito algunos datos adicionales para continuar con el diagnóstico.',
+      missingInformation: screening.missingInformation,
+      references: [],
+      aiGenerated: true,
+    };
+  }
+
+  if (screening.kind === 'out_of_scope') {
+    return {
+      status: 'out_of_scope',
+      message: 'Esta consulta está fuera del alcance del asistente de soporte de OmniDesk.',
+      references: [],
+      aiGenerated: true,
+    };
+  }
 
   const retrieval = await retrieveAuthorizedContext(question, user);
 

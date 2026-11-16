@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AIReferences from './AIReferences.vue'
+import AITransparency from './AITransparency.vue'
 import { computed, nextTick, ref } from 'vue'
 import { ApiError } from '@/api/http'
 import {
@@ -7,6 +8,7 @@ import {
   reviewInteraction,
   applyInteraction,
   type AssistantAnswer,
+  type AITransparency as AITransparencyInfo,
   type ReviewDecision,
   type ApplyInvestigationContent,
   type ApplyResolutionContent,
@@ -18,11 +20,20 @@ import { hasPermission } from '../services/session'
  */
 const props = defineProps<{ ticketId?: number }>()
 
+const technicalErrorTransparency: AITransparencyInfo = {
+  status: 'technical_error',
+  title: 'Error técnico del asistente',
+  message: 'No se pudo completar la consulta. No se obtuvo una recomendación ni un diagnóstico verificado.',
+  requiresHumanReview: false,
+  missingInformation: [],
+}
 interface Turn {
   question: string
   answer: AssistantAnswer | null
   loading: boolean
   error: string
+  technicalError?: boolean
+  /** AIR-004: decisión de revisión vigente sobre esta interacción. */
   reviewDecision?: ReviewDecision
   reviewError?: string
   reviewBusy?: boolean
@@ -70,7 +81,13 @@ async function submit() {
     turn.loading = false
   } catch (cause) {
     turn.loading = false
-    turn.error = cause instanceof ApiError ? cause.message : 'No se pudo obtener respuesta del asistente.'
+    turn.technicalError =
+      !(cause instanceof ApiError) ||
+      cause.kind === 'network' ||
+      cause.kind === 'server'
+    turn.error = cause instanceof ApiError
+      ? cause.message
+      : 'No se pudo obtener respuesta del asistente.'
   } finally {
     sending.value = false
     await scrollToEnd()
@@ -103,14 +120,7 @@ async function submitReview(turn: Turn, decision: ReviewDecision) {
     if (decision === 'needs_more_info' && result.followUp) {
       const followUpTurn: Turn = {
         question: `(Aclaración sobre la recomendación #${turn.answer!.id})`,
-        answer: {
-          id: result.followUp.id,
-          status: result.followUp.status as 'answered' | 'insufficient_information',
-          answer: result.followUp.answer,
-          references: [],
-          aiGenerated: true,
-          createdAt: new Date().toISOString(),
-        },
+        answer: result.followUp,
         loading: false,
         error: '',
       }
@@ -229,52 +239,22 @@ function formatDate(dateString: string) {
         <div v-else-if="turn.error" class="bubble ai error" role="alert">
           <strong>Asistente (IA):</strong>
           <p>{{ turn.error }}</p>
+          <AITransparency
+            v-if="turn.technicalError"
+            :transparency="technicalErrorTransparency"
+            status="technical_error"
+            :reference-count="0"
+          />
         </div>
 
         <div v-else-if="turn.answer" class="bubble ai">
           <strong>Asistente (IA):</strong>
           <p class="ai-text">{{ turn.answer.answer }}</p>
-          
-          <!-- 1. Origen IA (NFR-003) -->
-          <div class="mt-3 mb-2 flex flex-col gap-2">
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 w-fit">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
-              </svg>
-              Generado por IA
-            </span>
-
-            <!-- 2. Estado de la revisión (AIR-004 / AIR-006) -->
-            <div v-if="turn.reviewDecision" class="flex items-center gap-2 text-sm">
-              <span v-if="turn.reviewDecision === 'approved'" class="text-green-700 font-medium flex items-center gap-1.5">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-                </svg>
-                Confirmado. Listo para aplicar.
-              </span>
-              <span v-else-if="turn.reviewDecision === 'rejected'" class="text-red-700 font-medium flex items-center gap-1.5">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-                </svg>
-                Rechazado
-              </span>
-              <span v-else-if="turn.reviewDecision === 'needs_more_info'" class="text-yellow-700 font-medium flex items-center gap-1.5">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-                Requiere más información
-              </span>
-            </div>
-            
-            <!-- 3. Estado de Aplicado (AIR-006) -->
-            <div v-if="turn.applied" class="text-sm text-gray-700 bg-gray-50 p-2.5 rounded-md border border-gray-200 flex items-center gap-2 w-fit">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500">
-                <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-              </svg>
-              <span><strong>Aplicado</strong> al ticket #{{ turn.applied.destinationId }} el {{ formatDate(turn.applied.appliedAt) }}</span>
-            </div>
-          </div>
-
+          <AITransparency
+            :transparency="turn.answer.transparency"
+            :status="turn.answer.status"
+            :reference-count="turn.answer.references.length"
+          />
           <p v-if="turn.answer.status === 'insufficient_information'" class="hint">
             No se encontraron fuentes autorizadas suficientes para responder.
           </p>
@@ -283,12 +263,30 @@ function formatDate(dateString: string) {
           </p>
           
           <AIReferences :references="turn.answer.references" />
+          <p v-if="turn.answer.status === 'answered' && turn.answer.transparency?.status === 'supported' && turn.answer.references.length > 0" class="ai-disclaimer">⚠ Respuesta generada por IA. Revisa antes de aplicar.</p>
 
-          <!-- Acciones de revisión -->
-          <div v-if="canValidate && !turn.reviewDecision && turn.answer.status === 'answered'" class="review-actions">
-            <button type="button" class="secondary" :disabled="!!turn.reviewBusy" @click="submitReview(turn, 'approved')">Aprobar recomendación</button>
-            <button type="button" class="secondary" :disabled="!!turn.reviewBusy" @click="submitReview(turn, 'needs_more_info')">Solicitar más información</button>
-            <button v-if="isManager" type="button" class="secondary danger" :disabled="!!turn.reviewBusy" @click="submitReview(turn, 'rejected')">Rechazar</button>
+          <!-- AIR-004: acciones de revisión. Sólo para usuarios con ai:validate.
+               Abrir la recomendación NO la aprueba; se exige acción explícita + motivo. -->
+          <div v-if="canValidate && !turn.reviewDecision && turn.answer.status === 'answered' && turn.answer.transparency?.status === 'supported' && turn.answer.references.length > 0" class="review-actions">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="!!turn.reviewBusy"
+              @click="submitReview(turn, 'approved')"
+            >Aprobar recomendación</button>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="!!turn.reviewBusy"
+              @click="submitReview(turn, 'needs_more_info')"
+            >Solicitar más información</button>
+            <button
+              v-if="isManager"
+              type="button"
+              class="secondary danger"
+              :disabled="!!turn.reviewBusy"
+              @click="submitReview(turn, 'rejected')"
+            >Rechazar</button>
           </div>
 
           <p v-if="turn.reviewError" class="error" role="alert">{{ turn.reviewError }}</p>
