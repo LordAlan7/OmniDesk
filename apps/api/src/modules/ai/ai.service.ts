@@ -17,20 +17,23 @@ export type AuthorizedAnswer =
   | { status: 'insufficient_information'; message: string; references: []; aiGenerated: true }
   | { status: 'needs_more_info'; message: string; missingInformation: string[]; references: []; aiGenerated: true }
   | { status: 'out_of_scope'; message: string; references: []; aiGenerated: true }
-  | { status: 'answered'; answer: string; references: SourceReference[]; aiGenerated: true };
+  | { 
+      status: 'answered'; 
+      answer: string; 
+      references: SourceReference[]; 
+      aiGenerated: true;
+      // AIR-007: Agregamos la trazabilidad
+      providedContext: any[];
+      citations: any[];
+      generationConfig: Record<string, unknown>;
+    };
 
-/**
- * Responde SOLO con fuentes autorizadas (AIR-002). Sin fuentes válidas no se llama al modelo ni se
- * rellenan huecos con supuestos organizacionales: la respuesta es "información insuficiente".
- * Cada referencia identifica fuente, versión y fragmento usados (AIR-007).
- */
 export async function askWithAuthorizedSources(
   question: string,
   user: AuthUser,
   provider: AIProvider = createAIProvider(),
   options: { ticketId?: number } = {},
 ): Promise<AuthorizedAnswer> {
-  // AIR-008: permiso y acceso al ticket se verifican ANTES de recuperar o enviar nada al modelo.
   if (!can(user, PERMISSIONS.AI_QUERY)) throw Errors.forbidden();
   const ticketContext =
     options.ticketId === undefined ? undefined : await buildTicketContext(options.ticketId, user);
@@ -65,13 +68,12 @@ export async function askWithAuthorizedSources(
     return { status: 'insufficient_information', message: INSUFFICIENT_INFORMATION, references: [], aiGenerated: true };
   }
 
-  const answer = await provider.ask(
-    question,
-    [
-      ...(ticketContext
-        ? [{ articleId: 0, sourceType: 'ticket' as const, sourceId: ticketContext.ticketId, content: frameTicketContext(ticketContext) }]
-        : []),
-      ...retrieval.fragments.map((fragment) => {
+  // AIR-007: Armamos el contexto exacto que se le enviará al modelo.
+  const contextToSend = [
+    ...(ticketContext
+      ? [{ articleId: 0, sourceType: 'ticket' as const, sourceId: ticketContext.ticketId, content: frameTicketContext(ticketContext) }]
+      : []),
+    ...retrieval.fragments.map((fragment) => {
       const { content, ...reference } = fragment;
       return {
         articleId: fragment.sourceId,
@@ -80,12 +82,12 @@ export async function askWithAuthorizedSources(
         sourceVersion: fragment.sourceVersion,
         chunkIndex: fragment.chunkIndex,
         authorizationId: fragment.authorizationId,
-        // Dato enmarcado: el contenido de la fuente nunca se mezcla con instrucciones.
         content: frameAsData(reference, content),
       };
     }),
-    ],
-  );
+  ];
+
+  const answer = await provider.ask(question, contextToSend);
 
   // AIR-008: si durante la generación se retiró una fuente o el acceso al ticket, no se entrega el resultado.
   if (options.ticketId !== undefined) await buildTicketContext(options.ticketId, user);
@@ -121,8 +123,16 @@ export async function askWithAuthorizedSources(
   }
 
   return {
-    status: 'answered',    answer: answer.text,
+    status: 'answered',
+    answer: answer.text,
     references,
     aiGenerated: true,
+    // AIR-007: Devolvemos la trazabilidad para que se guarde en la base de datos
+    providedContext: contextToSend,
+    citations: answer.citations || [],
+    generationConfig: { 
+      provider: 'default',
+      generatedAt: new Date().toISOString() 
+    },
   };
 }
