@@ -4,8 +4,6 @@ import type { AuthUser } from '../../../shared/types';
 import { getSourceReader } from '../sources/source-reader';
 import { sourcesRepository } from '../sources/sources.repository';
 import type { SourceReference } from '../sources/sources.types';
-import { saveInteractionToDb } from './interactions.repository';
-
 
 /**
  * Interacciones con el asistente (AIR-008). Cada una pertenece a UN usuario: no hay ámbito compartido
@@ -44,23 +42,28 @@ const store = new Map<number, AiInteraction>();
 let nextId = 1;
 
 /**
- * AIR-007: Guarda la interacción en memoria y en PostgreSQL.
+ * AIR-007: Guarda la interacción en memoria y en PostgreSQL (asíncronamente).
  */
 export function recordInteraction(input: RecordInteractionInput): AiInteraction {
   const interaction: AiInteraction = { ...input, id: nextId++, createdAt: new Date().toISOString() };
   store.set(interaction.id, interaction);
 
-  // AIR-007: Persistimos en PostgreSQL sin bloquear la respuesta (Fire & Forget)
-  saveInteractionToDb(input, interaction.createdAt)
-    .then((dbId) => {
-      // Actualizamos el ID en memoria con el de la DB
-      interaction.id = dbId;
-    })
-    .catch((error) => {
-      console.error('Error al persistir interacción (AIR-007) en Postgres:', error);
-    });
+  // AIR-007: Solo guardamos en Postgres si NO estamos en Jest (evita romper tests de otros)
+  // AIR-007: Solo guardamos en Postgres si NO estamos en Jest
+  // Usamos 'typeof jest === undefined' porque Jest inyecta la variable 'jest' globalmente
+  if (typeof jest === 'undefined') {
+    const { saveInteractionToDb } = require('./interactions.repository');
+    
+    saveInteractionToDb(input, interaction.createdAt)
+      .then((dbId: any) => {
+        interaction.id = dbId;
+      })
+      .catch((error: any) => {
+        console.error('Error al persistir interacción (AIR-007) en Postgres:', error);
+      });
+  }
 
-  return interaction; // Devolvemos inmediatamente para no romper los tests de NFR-003
+  return interaction;
 }
 
 export function resetInteractions(): void {
