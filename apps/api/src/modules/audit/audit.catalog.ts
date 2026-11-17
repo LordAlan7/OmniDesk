@@ -110,6 +110,9 @@ export const AUDIT_EVENTS = {
     outcome: 'rejected',
     valuesInAudit: false,
   }),
+  'ai.validation_applied': event('ai_validation', 'ai', 'Se aplicó al destino una propuesta validada (AIR-006).', {
+  /* campos requeridos: interactionId, validationId, destinationType, destinationId */
+  }),
   // AIR-004 + FR-009: la recomendación aprobada se aplicó al ticket (a una
   // investigación o a la resolución). El guardado lo hace FR-009; aquí sólo
   // enlazamos la interacción con el ticket y el resultado (saved id).

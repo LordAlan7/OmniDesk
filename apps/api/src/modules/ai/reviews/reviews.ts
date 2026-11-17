@@ -104,3 +104,31 @@ export function canTakeDecision(user: AuthUser, decision: ReviewDecision): void 
     throw Errors.forbidden('Sólo un Manager puede rechazar una recomendación de IA.');
   }
 }
+
+import { recordValidation } from '../validation/validations.service';
+
+/**
+ * AIR-006: Guarda la decisión de forma persistente en PostgreSQL
+ * para que el guard de aplicación pueda verificarla.
+ */
+export async function recordReviewPersisted(input: {
+  interactionId: number;
+  proposalId: string;
+  contentVersion: string;
+  destinationType: 'ticket' | 'quotation' | 'other';
+  destinationId?: number | null;
+  decision: 'approved' | 'rejected' | 'needs_more_info';
+  reason: string;
+  reviewerId: number;
+}) {
+  return recordValidation({
+    interactionId: input.interactionId,
+    proposalId: input.proposalId,
+    contentVersion: input.contentVersion,
+    destinationType: input.destinationType,
+    destinationId: input.destinationId ?? null,
+    decision: input.decision,
+    reason: input.reason,
+    reviewerId: input.reviewerId,
+  });
+}

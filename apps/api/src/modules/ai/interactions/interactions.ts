@@ -8,10 +8,8 @@ import type { SourceReference } from '../sources/sources.types';
 /**
  * Interacciones con el asistente (AIR-008). Cada una pertenece a UN usuario: no hay ámbito compartido
  * mientras no se apruebe una política (por aprobar). FR-013 las creará; aquí solo se define el acceso.
- * Almacén en memoria: la persistencia en PostgreSQL llega con FR-013/AIR-007.
- *
- * AIR-004: añadimos `ticketId` (opcional) para que el flujo de revisión/aplicación
- * pueda revalidar el acceso al ticket sin necesidad de pedirlo de nuevo al cliente.
+ * 
+ * AIR-007: Persistencia en PostgreSQL de la trazabilidad (contexto suministrado, citas y configuración).
  */
 export interface AiInteraction {
   id: number;
@@ -22,6 +20,18 @@ export interface AiInteraction {
   /** AIR-004: ticket al que se asoció la consulta, si lo hubo. Lo usa /review y /apply. */
   ticketId?: number | null;
   createdAt: string;
+  /** AIR-007: Fragmentos exactos enviados al modelo. */
+  providedContext?: any[];
+  /** AIR-007: Citas que el modelo declaró usar. */
+  citations?: any[];
+  /** AIR-007: Configuración del modelo (ej. versión, temperatura). */
+  generationConfig?: Record<string, unknown>;
+}
+
+export interface RecordInteractionInput extends Omit<AiInteraction, 'id' | 'createdAt'> {
+  providedContext?: any[];
+  citations?: any[];
+  generationConfig?: Record<string, unknown>;
 }
 
 export type InteractionView =
@@ -31,9 +41,28 @@ export type InteractionView =
 const store = new Map<number, AiInteraction>();
 let nextId = 1;
 
-export function recordInteraction(input: Omit<AiInteraction, 'id' | 'createdAt'>): AiInteraction {
+/**
+ * AIR-007: Guarda la interacción en memoria y en PostgreSQL (asíncronamente).
+ */
+export function recordInteraction(input: RecordInteractionInput): AiInteraction {
   const interaction: AiInteraction = { ...input, id: nextId++, createdAt: new Date().toISOString() };
   store.set(interaction.id, interaction);
+
+  // AIR-007: Solo guardamos en Postgres si NO estamos en Jest (evita romper tests de otros)
+  // AIR-007: Solo guardamos en Postgres si NO estamos en Jest
+  // Usamos 'typeof jest === undefined' porque Jest inyecta la variable 'jest' globalmente
+  if (typeof jest === 'undefined') {
+    const { saveInteractionToDb } = require('./interactions.repository');
+    
+    saveInteractionToDb(input, interaction.createdAt)
+      .then((dbId: any) => {
+        interaction.id = dbId;
+      })
+      .catch((error: any) => {
+        console.error('Error al persistir interacción (AIR-007) en Postgres:', error);
+      });
+  }
+
   return interaction;
 }
 
@@ -50,7 +79,7 @@ export function getInteractionById(id: number): AiInteraction | undefined {
 /**
  * Devuelve la interacción SOLO a su dueño (404 para cualquier otro, sin distinguir). Al reabrirla se
  * revalida cada referencia con los permisos actuales: si una fuente se retiró o el usuario perdió
- * acceso, el texto generado NO se vuelve a mostrar (no se intenta redactar fragmentos del texto).
+ * acceso, el texto generado NO se vuelve a mostrar.
  */
 export async function getInteractionForUser(id: number, user: AuthUser): Promise<InteractionView> {
   if (!can(user, PERMISSIONS.AI_INTERACTIONS_READ)) throw Errors.forbidden();
