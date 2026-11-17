@@ -22,8 +22,12 @@ export {
   reopenTicket,
   listInvestigations,
   createTicket,
-  updateTicket,
 } from './tickets.service';
+
+// AIR-005: el módulo AI necesita revalidar que la categoría confirmada de la
+// sugerencia siga existiendo en el catálogo antes de crear el ticket
+// (criterio: "Los catálogos y permisos se validan nuevamente al guardar").
+export { listCategories } from './tickets.service';
 
 export {
   hasPendingTicketsForTechnician,

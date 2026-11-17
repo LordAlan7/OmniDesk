@@ -114,11 +114,15 @@ export const aiTicketSuggestionSchema = z
  * más los campos finales, ya editados. El backend valida que:
  *  - el `suggestionId` exista y pertenezca al usuario (anti-sustitución);
  *  - no esté ya confirmado (no se confirma dos veces);
- *  - los campos respeten las mismas reglas que la creación de ticket
+ *  - los campos respetan las mismas reglas que la creación de ticket
  *    (longitudes, categoría válida si viene string).
  *
  * El `suggestionId` es la prueba de que el usuario revisó la sugerencia
- * antes de crear/actualizar el ticket (criterio de aceptación de AIR-005).
+ * antes de crear el ticket (criterio de aceptación de AIR-005).
+ *
+ * Nota: el modo "actualizar ticket existente" NO está habilitado en esta
+ * versión; cuando se acuerde, los campos `ticketId` y `version` se
+ * añadirán a este esquema o a uno separado para no mezclar contratos.
  */
 export const aiTicketSuggestionConfirmSchema = z
   .object({

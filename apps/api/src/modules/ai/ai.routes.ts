@@ -24,7 +24,12 @@ import {
   canTakeDecision,
 } from './reviews/reviews';
 import { reviewSchema, applySchema } from './reviews/reviews.schemas';
-import { addInvestigation, resolveTicket, createTicket, updateTicket } from '../tickets';
+import {
+  addInvestigation,
+  resolveTicket,
+  createTicket,
+  listCategories,
+} from '../tickets';
 import { assertAiValidated } from './validation/guard';
 import * as validationsService from './validation/validations.service';
 import { hashContent } from './validation/validations.service';
@@ -36,6 +41,7 @@ import {
 import {
   generateTicketSuggestion,
   confirmSuggestion,
+  discardSuggestion,
   getConfirmedSuggestion,
   removeSuggestion,
   getSuggestionForUser,
@@ -461,8 +467,16 @@ aiRouter.post(
 
 /**
  * AIR-005 — el usuario confirma (posiblemente editada) la sugerencia.
- * El backend valida propiedad y que no esté ya confirmada, persiste los
- * campos finales y marca `confirmedAt`.
+ *
+ * La confirmación del usuario equivale a la revisión humana aprobada
+ * (AIR-006 / FR-015): por eso, además de marcar la sugerencia como
+ * confirmada en el almacén, se persiste una validación aprobada en
+ * Postgres con `recordReviewPersisted`. El `interactionId` es el
+ * `suggestionId` (la sugerencia es una interacción ligera de AIR-005);
+ * el `destinationType` es 'ticket' y `destinationId` es null porque el
+ * ticket aún no existe (se crea en `apply`). El `contentVersion` es el
+ * hash de los campos confirmados, y debe coincidir con el que se usa
+ * en `apply` al llamar a `assertAiValidated`.
  *
  * Auditoría: `ai.ticket_suggestion_confirmed`.
  */
@@ -491,6 +505,20 @@ aiRouter.post(
 
       const response = confirmSuggestion(suggestionId, user.id, parsed.data);
 
+      // AIR-006: persistir la validación aprobada. El `contentVersion` es el
+      // hash de los campos confirmados; `apply` lo recalculará sobre el
+      // mismo objeto y debe coincidir, o `assertAiValidated` lanzará 403.
+      await recordReviewPersisted({
+        interactionId: suggestionId,
+        proposalId: String(suggestionId),
+        contentVersion: hashContent(parsed.data),
+        destinationType: 'ticket',
+        destinationId: null,
+        decision: 'approved',
+        reason: 'Sugerencia de ticket confirmada por el usuario.',
+        reviewerId: user.id,
+      });
+
       recordAudit({
         action: 'ai.ticket_suggestion_confirmed',
         entity: 'ai_ticket_suggestion',
@@ -510,14 +538,63 @@ aiRouter.post(
 );
 
 /**
- * AIR-005 — aplica la sugerencia confirmada al ticket. Dos modos:
- *  - `mode: "create"`: crea un ticket nuevo con los campos confirmados.
- *  - `mode: "update"`: actualiza un ticket existente (requiere `ticketId`
- *    y `version` para control de concurrencia).
+ * AIR-005 — el usuario descarta la sugerencia sin aplicarla.
  *
- * El backend recupera la sugerencia confirmada con `getConfirmedSuggestion`
- * (que valida propiedad y estado confirmado), la materializa en el ticket
- * y libera la sugerencia del almacén con `removeSuggestion`.
+ * Si la sugerencia ya estaba confirmada, se rechaza con 409: una vez
+ * confirmada, el camino es `apply` (o ignorarla), no descartarla. Si la
+ * sugerencia no existe (ya descartada o nunca creada), se responde
+ * idempotente (200) para que el frontend no rompa.
+ *
+ * El descarte cierra el flujo sin crear ticket y deja la creación manual
+ * disponible (criterio de aceptación: "La creación manual permanece
+ * disponible ante fallos" / "El usuario puede revisar, modificar y
+ * descartar la propuesta").
+ *
+ * No se registra auditoría específica del descarte: el criterio de
+ * aceptación pide "El usuario puede revisar, modificar y descartar" como
+ * acción de UI, no como evento auditable. Si más adelante se requiere
+ * trazabilidad del descarte, se añade el evento `ai.ticket_suggestion_discarded`
+ * al catálogo y aquí.
+ */
+aiRouter.delete(
+  '/ai/ticket-suggestions/:id',
+  authenticate,
+  requirePermission(PERMISSIONS.AI_QUERY),
+  async (req, res, next) => {
+    try {
+      const suggestionId = parseId(req.params.id);
+      const user = currentUser(req);
+
+      const result = discardSuggestion(suggestionId, user.id);
+
+      ok(res, result);
+    } catch (cause) {
+      next(cause);
+    }
+  },
+);
+
+/**
+ * AIR-005 — aplica la sugerencia confirmada creando un ticket nuevo.
+ *
+ * Antes de crear el ticket se llama a `assertAiValidated` (AIR-006): exige
+ * que exista una validación humana aprobada y vigente en Postgres para el
+ * contenido que se va a aplicar. Así, aunque un cliente manipulado intente
+ * saltarse el paso de `confirm` y llamar `apply` directamente, el backend
+ * lo rechaza con 403. El `interactionId` es el `suggestionId`, el
+ * `destinationType` es 'ticket' y `destinationId` es undefined porque el
+ * ticket no existe antes de crearlo (el guard interno lo admite).
+ *
+ * Además, se revalida que `categoryId` siga existiendo en el catálogo
+ * activo de tickets (criterio de aceptación: "Los catálogos y permisos
+ * se validan nuevamente al guardar"). El catálogo podría haber cambiado
+ * entre el `confirm` y el `apply` (una categoría se eliminó); en ese
+ * caso se rechaza con 409 y el usuario debe reconfirmar con otra categoría.
+ *
+ * El modo "update" (actualizar un ticket existente) NO está habilitado en
+ * esta versión: el requerimiento AIR-005 dice "La aplicación a tickets
+ * existentes debe confirmarse antes de habilitarla". Cuando el equipo
+ * acuerde ese alcance y sus controles, se añadirá una rama `mode: "update"`.
  *
  * Auditoría: `ai.ticket_suggestion_applied`.
  */
@@ -532,19 +609,7 @@ aiRouter.post(
 
       const { original, confirmed } = getConfirmedSuggestion(suggestionId, user.id);
 
-      // Validación mínima del modo de aplicación.
-      const mode =
-        typeof req.body?.mode === 'string' ? req.body.mode : 'create';
-      if (mode !== 'create' && mode !== 'update') {
-        throw Errors.validation([
-          {
-            field: 'mode',
-            message: 'mode debe ser "create" o "update".',
-          },
-        ]);
-      }
-
-      // `categoryId` es obligatorio para crear/actualizar: el frontend debe
+      // `categoryId` es obligatorio para crear: el frontend debe
       // resolverlo desde `categoryName` antes de confirmar. Si no lo hizo,
       // se rechaza aquí.
       if (confirmed.categoryId === null || confirmed.categoryId === undefined) {
@@ -558,95 +623,70 @@ aiRouter.post(
         );
       }
 
-      if (mode === 'create') {
-        const ticket = await createTicket(
-          {
-            title: confirmed.title,
-            description: confirmed.description,
-            categoryId: confirmed.categoryId,
-            storeLocation: confirmed.storeLocation,
-            motorcycleModel: confirmed.motorcycleModel,
-          },
-          user,
-        );
-
-        recordAudit({
-          action: 'ai.ticket_suggestion_applied',
-          entity: 'ai_ticket_suggestion',
-          entityId: suggestionId,
-          actorId: user.id,
-          metadata: {
-            mode: 'create',
-            ticketId: ticket.id,
-            ticketVersion: ticket.version,
-          },
-        });
-
-        removeSuggestion(suggestionId, user.id);
-
-        ok(
-          res,
-          {
-            applied: true,
-            mode: 'create',
-            ticketId: ticket.id,
-            ticketVersion: ticket.version,
-            originalSuggestion: original,
-          },
-          201,
-        );
-      } else {
-        // mode === 'update'
-        const ticketId = Number(req.body?.ticketId);
-        const version = Number(req.body?.version);
-        if (!Number.isInteger(ticketId) || ticketId <= 0) {
-          throw Errors.validation([
-            { field: 'ticketId', message: 'ticketId es obligatorio para mode=update.' },
-          ]);
-        }
-        if (!Number.isInteger(version) || version <= 0) {
-          throw Errors.validation([
-            { field: 'version', message: 'version es obligatorio para mode=update.' },
-          ]);
-        }
-
-        const ticket = await updateTicket(
-          ticketId,
-          {
-            title: confirmed.title,
-            description: confirmed.description,
-            categoryId: confirmed.categoryId,
-            version,
-          },
-          user,
-        );
-
-        recordAudit({
-          action: 'ai.ticket_suggestion_applied',
-          entity: 'ai_ticket_suggestion',
-          entityId: suggestionId,
-          actorId: user.id,
-          metadata: {
-            mode: 'update',
-            ticketId: ticket.id,
-            ticketVersion: ticket.version,
-          },
-        });
-
-        removeSuggestion(suggestionId, user.id);
-
-        ok(
-          res,
-          {
-            applied: true,
-            mode: 'update',
-            ticketId: ticket.id,
-            ticketVersion: ticket.version,
-            originalSuggestion: original,
-          },
-          201,
+      // Revalidación del catálogo (criterio: "Los catálogos y permisos se
+      // validan nuevamente al guardar"). La categoría pudo haberse eliminado
+      // entre el `confirm` y el `apply`; en ese caso se rechaza con 409.
+      const activeCategories = await listCategories();
+      const categoryExists = activeCategories.some(
+        (c) => c.id === confirmed.categoryId,
+      );
+      if (!categoryExists) {
+        throw Errors.invalidState(
+          'La categoría confirmada ya no existe en el catálogo. Vuelve a confirmar la sugerencia con una categoría válida.',
         );
       }
+
+      // AIR-006: exigir validación humana aprobada y vigente para el
+      // contenido confirmado. El hash se calcula sobre el mismo objeto
+      // `confirmed` que se persistió en `confirm`, así que deben coincidir.
+      const { validationId } = await assertAiValidated({
+        interactionId: suggestionId,
+        proposalId: String(suggestionId),
+        destinationType: 'ticket',
+        destinationId: undefined,
+        payload: confirmed,
+        user,
+      });
+
+      const ticket = await createTicket(
+        {
+          title: confirmed.title,
+          description: confirmed.description,
+          categoryId: confirmed.categoryId,
+          storeLocation: confirmed.storeLocation,
+          motorcycleModel: confirmed.motorcycleModel,
+        },
+        user,
+      );
+
+      recordAudit({
+        action: 'ai.ticket_suggestion_applied',
+        entity: 'ai_ticket_suggestion',
+        entityId: suggestionId,
+        actorId: user.id,
+        metadata: {
+          mode: 'create',
+          ticketId: ticket.id,
+          ticketVersion: ticket.version,
+          validationId,
+          categoryId: confirmed.categoryId,
+        },
+      });
+
+      removeSuggestion(suggestionId, user.id);
+
+      ok(
+        res,
+        {
+          applied: true,
+          mode: 'create',
+          ticketId: ticket.id,
+          ticketVersion: ticket.version,
+          validationId,
+          originalSuggestion: original,
+        },
+        201,
+      );
     } catch (cause) {
       next(cause);
     }
