@@ -31,6 +31,30 @@ export interface AIContextItem {
   authorizationId?: number;
 }
 
+export interface QuotationContext {
+  ticketId: number;
+  title: string;
+  description: string;
+  status: string;
+  categoryId: number;
+  storeLocation: string | null;
+  motorcycleModel: string | null;
+}
+
+export interface QuotationSuggestion {
+  title: string;
+  description: string;
+  conditions: string | null;
+  observations: string | null;
+  items: {
+    concept: string;
+    description: string | null;
+    quantity: number;
+    unit: string | null;
+  }[];
+  missingInformation: string[];
+}
+
 export interface AIProvider {
   ask(question: string, context: AIContextItem[]): Promise<AIAnswer>;
   /**
@@ -43,6 +67,10 @@ export interface AIProvider {
    * proveedor no puede añadir campos de control ni omitir los obligatorios.
    */
   suggestTicketFields?(description: string, currentTitle?: string): Promise<TicketFieldSuggestion>;
+
+  suggestQuotation?(
+    context: QuotationContext,
+  ): Promise<QuotationSuggestion>;
 }
 
 /**

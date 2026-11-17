@@ -144,6 +144,12 @@ export const AUDIT_EVENTS = {
   'ai.ticket_suggestion_applied': event('ai_ticket_suggestion', 'ai', 'La sugerencia confirmada se aplicó a un ticket (AIR-005).', {
     valuesInAudit: false,
   }),
+  'quotation.reviewed': event(
+    'quotation',
+    'ai',
+    'Una persona revisó una versión de cotización.',
+    { valuesInAudit: false },
+  ),
 } as const satisfies Record<string, AuditEventDefinition>;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

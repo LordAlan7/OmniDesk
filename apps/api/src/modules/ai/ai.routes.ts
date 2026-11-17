@@ -33,6 +33,7 @@ import {
 import { assertAiValidated } from './validation/guard';
 import * as validationsService from './validation/validations.service';
 import { hashContent } from './validation/validations.service';
+import { quotationsRouter } from './quotations/quotations.routes';
 import {
   askSchema,
   ticketSuggestionRequestSchema,
@@ -50,7 +51,7 @@ import {
 export const aiRouter = Router();
 const REQUIREMENTS = ['FR-013', 'FR-014', 'FR-015', 'FR-021', 'NFR-003'];
 
-aiRouter.use(aiSourcesRouter);
+aiRouter.use(quotationsRouter);
 
 /**
  * AIR-001 — el asistente responde.

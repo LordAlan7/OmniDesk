@@ -18,7 +18,7 @@ import type {
  * simples y deterministas: el equipo de QA puede escribir tests exactos
  * contra estas reglas sin depender de un modelo no determinista.
  */
-export class MockProvider implements AIProvider {
+export class MockAIProvider implements AIProvider {
   async ask(question: string, context: AIContextItem[]): Promise<AIAnswer> {
     if (context.length === 0) {
       return {
@@ -99,6 +99,26 @@ export class MockProvider implements AIProvider {
       storeLocation,
       motorcycleModel,
       missingInformation: missing,
+    };
+  }
+
+  async suggestQuotation(
+    context: import('./ai-provider').QuotationContext,
+  ): Promise<import('./ai-provider').QuotationSuggestion> {
+    return {
+      title: `Cotización preliminar — ${context.title}`,
+      description:
+        'Propuesta preliminar elaborada a partir de la información disponible en el ticket.',
+      conditions: null,
+      observations:
+        'Esta propuesta requiere revisión de los conceptos y cantidades antes de su aprobación.',
+      items: [],
+      missingInformation: [
+        'Conceptos específicos de servicios y materiales.',
+        'Cantidades requeridas.',
+        'Confirmación de los trabajos que deben realizarse.',
+        'Precios y condiciones comerciales.',
+      ],
     };
   }
 }
