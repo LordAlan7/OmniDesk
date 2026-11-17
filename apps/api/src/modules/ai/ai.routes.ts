@@ -9,19 +9,17 @@ import { askWithAuthorizedSources, INSUFFICIENT_INFORMATION } from './ai.service
 import { transparencyForAuthorizedAnswer } from './ai.transparency';
 import {
   getInteractionForUser,
-  recordInteraction,
-  getInteractionById,
   assertInteractionCurrentlySupported,
 } from './interactions/interactions';
 import { aiSourcesRouter } from './sources/sources.routes';
 import {
-  recordReview,
-  getActiveReviewForInteraction,
-  attachFollowUp,
   canTakeDecision,
 } from './reviews/reviews';
 import { reviewSchema, applySchema } from './reviews/reviews.schemas';
 import { addInvestigation, resolveTicket } from '../tickets';
+
+import { interactionsService } from './interactions/interactions.service';
+import { reviewsService } from './reviews/reviews.service';
 
 export const aiRouter = Router();
 const REQUIREMENTS = ['FR-013', 'FR-014', 'FR-015', 'FR-021', 'NFR-003'];
@@ -67,7 +65,7 @@ aiRouter.post('/ai/ask', authenticate, requirePermission(PERMISSIONS.AI_QUERY), 
       throw cause;
     }
 
-    const interaction = recordInteraction({
+    const interaction = await interactionsService.create({
       userId: user.id,
       question,
       answer: answer.status === 'answered' ? answer.answer : answer.message,
@@ -108,7 +106,11 @@ aiRouter.post('/ai/ask', authenticate, requirePermission(PERMISSIONS.AI_QUERY), 
 // Solo el dueño abre su interacción; las referencias se revalidan con los permisos actuales.
 aiRouter.get('/ai/interactions/:id', authenticate, requirePermission(PERMISSIONS.AI_INTERACTIONS_READ), async (req, res, next) => {
   try {
-    ok(res, await getInteractionForUser(parseId(req.params.id), currentUser(req)));
+    ok(res, await getInteractionForUser(
+      parseId(req.params.id),
+      currentUser(req),
+      interactionsService.findById,
+    ));
   } catch (cause) {
     next(cause);
   }
@@ -150,7 +152,7 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
     const user = currentUser(req);
 
     // El revisor debe ser el dueño de la interacción.
-    const interaction = getInteractionById(interactionId);
+    const interaction = await interactionsService.findById(interactionId);
     if (!interaction || interaction.userId !== user.id) {
       throw Errors.notFound('Interaction');
     }
@@ -162,8 +164,8 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
       await assertInteractionCurrentlySupported(interaction, user);
     }
 
-    const previous = getActiveReviewForInteraction(interactionId);
-    const review = recordReview({
+    const previous = await reviewsService.findActive(interactionId);
+    const review = await reviewsService.create({
       interactionId,
       reviewerId: user.id,
       decision,
@@ -222,7 +224,7 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
           : {},
       );
 
-      const followUpInteraction = recordInteraction({
+      const followUpInteraction = await interactionsService.create({
         userId: user.id,
         question: followUpQuestion,
         answer: followUpAnswer.status === 'answered' ? followUpAnswer.answer : followUpAnswer.message,
@@ -230,7 +232,7 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
         ticketId: interaction.ticketId ?? null,
       });
 
-      attachFollowUp(review.id, followUpInteraction.id);
+      await reviewsService.attachFollowUp(review.id, followUpInteraction.id);
 
       recordAudit({
         action: 'ai.suggestion_generated',
@@ -306,7 +308,7 @@ aiRouter.post('/ai/interactions/:id/apply', authenticate, requirePermission(PERM
     const user = currentUser(req);
 
     // La interacción debe existir y ser del usuario.
-    const interaction = getInteractionById(interactionId);
+    const interaction = await interactionsService.findById(interactionId);
     if (!interaction || interaction.userId !== user.id) {
       throw Errors.notFound('Interaction');
     }
@@ -314,7 +316,7 @@ aiRouter.post('/ai/interactions/:id/apply', authenticate, requirePermission(PERM
     // La última revisión debe ser 'approved'.
     await assertInteractionCurrentlySupported(interaction, user);
 
-    const review = getActiveReviewForInteraction(interactionId);
+    const review = await reviewsService.findActive(interactionId);
     if (!review || review.decision !== 'approved') {
       throw Errors.invalidState(
         'La recomendación no está aprobada. Debe revisarse y aprobarse antes de aplicar.',
@@ -322,6 +324,12 @@ aiRouter.post('/ai/interactions/:id/apply', authenticate, requirePermission(PERM
     }
 
     // El ticketId del body debe coincidir con el de la interacción (anti-sustitución).
+    if (interaction.ticketId === null || interaction.ticketId === undefined) {
+      throw Errors.invalidState(
+        'La interaccion no esta asociada a un ticket y no puede aplicarse.',
+      );
+    }
+
     if (interaction.ticketId !== null && interaction.ticketId !== undefined) {
       if (parsed.data.ticketId !== interaction.ticketId) {
         throw Errors.forbidden(
@@ -369,6 +377,7 @@ aiRouter.post('/ai/interactions/:id/apply', authenticate, requirePermission(PERM
           knowledgeArticleId: parsed.data.content.knowledgeArticleId,
         },
         user,
+        parsed.data.expectedVersion,
       );
 
       recordAudit({

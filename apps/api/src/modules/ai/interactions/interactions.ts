@@ -52,10 +52,17 @@ export function getInteractionById(id: number): AiInteraction | undefined {
  * revalida cada referencia con los permisos actuales: si una fuente se retiró o el usuario perdió
  * acceso, el texto generado NO se vuelve a mostrar (no se intenta redactar fragmentos del texto).
  */
-export async function getInteractionForUser(id: number, user: AuthUser): Promise<InteractionView> {
+export async function getInteractionForUser(
+  id: number,
+  user: AuthUser,
+  loadInteraction: (
+    id: number
+  ) => Promise<AiInteraction | undefined> | AiInteraction | undefined =
+    getInteractionById,
+): Promise<InteractionView> {
   if (!can(user, PERMISSIONS.AI_INTERACTIONS_READ)) throw Errors.forbidden();
 
-  const interaction = store.get(id);
+  const interaction = await loadInteraction(id);
   if (!interaction || interaction.userId !== user.id) throw Errors.notFound('Interaction');
 
   for (const reference of interaction.references) {

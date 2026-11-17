@@ -638,6 +638,8 @@ export async function resolveTicket(
 
   user: AuthUser,
 
+  expectedVersion?: number,
+
 ): Promise<Ticket> {
 
   if (!can(user, PERMISSIONS.TICKETS_RESOLVE)) {
@@ -649,6 +651,15 @@ export async function resolveTicket(
   const ticket = await getTicketForUser(id, user);
 
   mustBeAssignedTechnicianOrStaff(ticket, user);
+
+  if (
+    expectedVersion !== undefined &&
+    ticket.version !== expectedVersion
+  ) {
+    throw Errors.conflict(
+      'La version del ticket cambio. Actualiza el ticket antes de aplicar la recomendacion.',
+    );
+  }
 
   // FR-009: validar la referencia opcional al artículo de conocimiento (FR-011).
   // resolveApprovedArticleReference lanza notFound/validation si el artículo no
