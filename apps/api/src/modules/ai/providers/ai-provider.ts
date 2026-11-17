@@ -33,4 +33,33 @@ export interface AIContextItem {
 
 export interface AIProvider {
   ask(question: string, context: AIContextItem[]): Promise<AIAnswer>;
+  /**
+   * AIR-005 — opcional: sugiere campos para un ticket a partir de la descripción
+   * libre del usuario. El proveedor que no lo implemente hace que el endpoint
+   * responda 501 (no soportado), pero la interfaz sigue válida para AIR-001.
+   *
+   * El contrato es ESTRICTO: el backend valida la salida con
+   * `aiTicketSuggestionSchema` antes de devolverla al frontend, así que el
+   * proveedor no puede añadir campos de control ni omitir los obligatorios.
+   */
+  suggestTicketFields?(description: string, currentTitle?: string): Promise<TicketFieldSuggestion>;
+}
+
+/**
+ * AIR-005 — propuesta de campos para un ticket. Todos los campos son
+ * sugerencias: el usuario los revisa y confirma antes de crear/actualizar.
+ *
+ * - `title` y `description` son siempre no vacíos (los rellena la IA).
+ * - `categoryName`, `storeLocation`, `motorcycleModel` son null cuando la IA
+ *   no pudo inferirlos con confianza: el usuario los completa a mano.
+ * - `missingInformation` lista los campos que el usuario debería revisar
+ *   antes de confirmar (guía para la UI, no un campo del ticket).
+ */
+export interface TicketFieldSuggestion {
+  title: string;
+  description: string;
+  categoryName: string | null;
+  storeLocation: string | null;
+  motorcycleModel: string | null;
+  missingInformation: string[];
 }

@@ -24,12 +24,22 @@ import {
   canTakeDecision,
 } from './reviews/reviews';
 import { reviewSchema, applySchema } from './reviews/reviews.schemas';
-import { addInvestigation, resolveTicket } from '../tickets';
+import { addInvestigation, resolveTicket, createTicket, updateTicket } from '../tickets';
 import { assertAiValidated } from './validation/guard';
 import * as validationsService from './validation/validations.service';
 import { hashContent } from './validation/validations.service';
-import { askSchema, ticketSuggestionRequestSchema } from './ai.schemas';
-import { generateTicketSuggestion } from './ai.ticket-suggestions';
+import {
+  askSchema,
+  ticketSuggestionRequestSchema,
+  aiTicketSuggestionConfirmSchema,
+} from './ai.schemas';
+import {
+  generateTicketSuggestion,
+  confirmSuggestion,
+  getConfirmedSuggestion,
+  removeSuggestion,
+  getSuggestionForUser,
+} from './ai.ticket-suggestions';
 
 export const aiRouter = Router();
 const REQUIREMENTS = ['FR-013', 'FR-014', 'FR-015', 'FR-021', 'NFR-003'];
@@ -246,9 +256,6 @@ aiRouter.post(
           interactionId,
           decision,
           reviewerId: review.reviewerId,
-          reviewedAt: review.reviewedAt,
-          supersedesId: review.supersedesId ?? null,
-          followUp: followUp,
         },
         201,
       );
@@ -384,6 +391,14 @@ aiRouter.post(
   },
   
 );
+
+/**
+ * AIR-005 — el usuario pide una sugerencia de campos para un ticket a
+ * partir de la descripción libre. El proveedor propone; el backend valida
+ * con `aiTicketSuggestionSchema` y persiste con `suggestionId`.
+ *
+ * Auditoría: `ai.ticket_suggestion_generated`.
+ */
 aiRouter.post(
   '/ai/ticket-suggestions',
   authenticate,
@@ -400,12 +415,240 @@ aiRouter.post(
         );
       }
 
-      const { description } = parsed.data;
-      const suggestion = await generateTicketSuggestion(description);
+      const user = currentUser(req);
+      const { description, currentTitle } = parsed.data;
 
-      ok(res, suggestion);
+      let response;
+      try {
+        response = await generateTicketSuggestion(description, user.id, currentTitle);
+      } catch (cause) {
+        if (
+          cause instanceof Error &&
+          'status' in cause &&
+          (cause as { status: number }).status === 502
+        ) {
+          recordAudit({
+            action: 'ai.request_failed',
+            entity: 'ai_interaction',
+            entityId: null,
+            actorId: user.id,
+            metadata: {
+              ticketId: null,
+              reason: 'suggestion_provider_error',
+            },
+          });
+        }
+        throw cause;
+      }
+
+      recordAudit({
+        action: 'ai.ticket_suggestion_generated',
+        entity: 'ai_ticket_suggestion',
+        entityId: response.suggestionId,
+        actorId: user.id,
+        metadata: {
+          missingInformation: response.suggestion.missingInformation.length,
+          categoryName: response.suggestion.categoryName,
+        },
+      });
+
+      ok(res, response, 201);
     } catch (cause) {
       next(cause);
     }
-  }
-); // <--- Asegúrate de que este paréntesis y punto y coma estén aquí
+  },
+);
+
+/**
+ * AIR-005 — el usuario confirma (posiblemente editada) la sugerencia.
+ * El backend valida propiedad y que no esté ya confirmada, persiste los
+ * campos finales y marca `confirmedAt`.
+ *
+ * Auditoría: `ai.ticket_suggestion_confirmed`.
+ */
+aiRouter.post(
+  '/ai/ticket-suggestions/:id/confirm',
+  authenticate,
+  requirePermission(PERMISSIONS.AI_QUERY),
+  async (req, res, next) => {
+    try {
+      const suggestionId = parseId(req.params.id);
+      const parsed = aiTicketSuggestionConfirmSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw Errors.validation(
+          parsed.error.issues.map((issue) => ({
+            field: issue.path.join('.') || 'body',
+            message: issue.message,
+          })),
+        );
+      }
+
+      const user = currentUser(req);
+
+      // Validación de propiedad anticipada (confirmSuggestion también la hace,
+      // pero así devolvemos 403/404 antes de tocar el almacén).
+      getSuggestionForUser(suggestionId, user.id);
+
+      const response = confirmSuggestion(suggestionId, user.id, parsed.data);
+
+      recordAudit({
+        action: 'ai.ticket_suggestion_confirmed',
+        entity: 'ai_ticket_suggestion',
+        entityId: suggestionId,
+        actorId: user.id,
+        metadata: {
+          categoryId: parsed.data.categoryId,
+          motorcycleModel: parsed.data.motorcycleModel,
+        },
+      });
+
+      ok(res, response);
+    } catch (cause) {
+      next(cause);
+    }
+  },
+);
+
+/**
+ * AIR-005 — aplica la sugerencia confirmada al ticket. Dos modos:
+ *  - `mode: "create"`: crea un ticket nuevo con los campos confirmados.
+ *  - `mode: "update"`: actualiza un ticket existente (requiere `ticketId`
+ *    y `version` para control de concurrencia).
+ *
+ * El backend recupera la sugerencia confirmada con `getConfirmedSuggestion`
+ * (que valida propiedad y estado confirmado), la materializa en el ticket
+ * y libera la sugerencia del almacén con `removeSuggestion`.
+ *
+ * Auditoría: `ai.ticket_suggestion_applied`.
+ */
+aiRouter.post(
+  '/ai/ticket-suggestions/:id/apply',
+  authenticate,
+  requirePermission(PERMISSIONS.AI_QUERY),
+  async (req, res, next) => {
+    try {
+      const suggestionId = parseId(req.params.id);
+      const user = currentUser(req);
+
+      const { original, confirmed } = getConfirmedSuggestion(suggestionId, user.id);
+
+      // Validación mínima del modo de aplicación.
+      const mode =
+        typeof req.body?.mode === 'string' ? req.body.mode : 'create';
+      if (mode !== 'create' && mode !== 'update') {
+        throw Errors.validation([
+          {
+            field: 'mode',
+            message: 'mode debe ser "create" o "update".',
+          },
+        ]);
+      }
+
+      // `categoryId` es obligatorio para crear/actualizar: el frontend debe
+      // resolverlo desde `categoryName` antes de confirmar. Si no lo hizo,
+      // se rechaza aquí.
+      if (confirmed.categoryId === null || confirmed.categoryId === undefined) {
+        throw Errors.invalidState(
+          'La sugerencia no tiene categoría asignada. Confírmala con una categoría antes de aplicarla.',
+        );
+      }
+      if (!confirmed.storeLocation || !confirmed.motorcycleModel) {
+        throw Errors.invalidState(
+          'La sugerencia no tiene ubicación o modelo. Complétalos antes de aplicarla.',
+        );
+      }
+
+      if (mode === 'create') {
+        const ticket = await createTicket(
+          {
+            title: confirmed.title,
+            description: confirmed.description,
+            categoryId: confirmed.categoryId,
+            storeLocation: confirmed.storeLocation,
+            motorcycleModel: confirmed.motorcycleModel,
+          },
+          user,
+        );
+
+        recordAudit({
+          action: 'ai.ticket_suggestion_applied',
+          entity: 'ai_ticket_suggestion',
+          entityId: suggestionId,
+          actorId: user.id,
+          metadata: {
+            mode: 'create',
+            ticketId: ticket.id,
+            ticketVersion: ticket.version,
+          },
+        });
+
+        removeSuggestion(suggestionId, user.id);
+
+        ok(
+          res,
+          {
+            applied: true,
+            mode: 'create',
+            ticketId: ticket.id,
+            ticketVersion: ticket.version,
+            originalSuggestion: original,
+          },
+          201,
+        );
+      } else {
+        // mode === 'update'
+        const ticketId = Number(req.body?.ticketId);
+        const version = Number(req.body?.version);
+        if (!Number.isInteger(ticketId) || ticketId <= 0) {
+          throw Errors.validation([
+            { field: 'ticketId', message: 'ticketId es obligatorio para mode=update.' },
+          ]);
+        }
+        if (!Number.isInteger(version) || version <= 0) {
+          throw Errors.validation([
+            { field: 'version', message: 'version es obligatorio para mode=update.' },
+          ]);
+        }
+
+        const ticket = await updateTicket(
+          ticketId,
+          {
+            title: confirmed.title,
+            description: confirmed.description,
+            categoryId: confirmed.categoryId,
+            version,
+          },
+          user,
+        );
+
+        recordAudit({
+          action: 'ai.ticket_suggestion_applied',
+          entity: 'ai_ticket_suggestion',
+          entityId: suggestionId,
+          actorId: user.id,
+          metadata: {
+            mode: 'update',
+            ticketId: ticket.id,
+            ticketVersion: ticket.version,
+          },
+        });
+
+        removeSuggestion(suggestionId, user.id);
+
+        ok(
+          res,
+          {
+            applied: true,
+            mode: 'update',
+            ticketId: ticket.id,
+            ticketVersion: ticket.version,
+            originalSuggestion: original,
+          },
+          201,
+        );
+      }
+    } catch (cause) {
+      next(cause);
+    }
+  },
+);

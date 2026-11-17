@@ -21,6 +21,8 @@ export {
   closeTicket,
   reopenTicket,
   listInvestigations,
+  createTicket,
+  updateTicket,
 } from './tickets.service';
 
 export {
