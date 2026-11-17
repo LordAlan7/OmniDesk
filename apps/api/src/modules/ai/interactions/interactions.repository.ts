@@ -1,26 +1,55 @@
-import { getPool } from '../../../shared/db/pool';
-import type { RecordInteractionInput } from './interactions';
+﻿import { env } from '../../../config/env';
+import type { AiInteraction } from './interactions';
 
-export async function saveInteractionToDb(
-  input: RecordInteractionInput,
-  createdAt: string
-): Promise<number> {
-  const pool = getPool();
-  const res = await pool.query(
-    `INSERT INTO ai_interaction 
-      (user_id, ticket_id, question, answer, sources, provided_context, citations, generation_config, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-    [
-      input.userId,
-      input.ticketId ?? null,
-      input.question,
-      input.answer,
-      JSON.stringify(input.references),
-      JSON.stringify(input.providedContext || []),
-      JSON.stringify(input.citations || []),
-      JSON.stringify(input.generationConfig || {}),
-      createdAt
-    ]
-  );
-  return res.rows[0].id;
+import {
+  recordInteraction,
+  getInteractionById,
+  resetInteractions,
+} from './interactions';
+
+import {
+  createInteractionInPostgres,
+  findInteractionInPostgres,
+  listInteractionsInPostgres,
+} from './interactions.postgres.repository';
+
+export interface InteractionRepository {
+  create(
+    input: Omit<AiInteraction, 'id' | 'createdAt'>
+  ): Promise<AiInteraction>;
+
+  findById(id: number): Promise<AiInteraction | undefined>;
+
+  listByUser(userId: number): Promise<AiInteraction[]>;
+}
+
+const memoryRepository: InteractionRepository = {
+  async create(input) {
+    return recordInteraction(input);
+  },
+
+  async findById(id) {
+    return getInteractionById(id);
+  },
+
+  async listByUser(_userId) {
+    throw new Error(
+      'El listado de interacciones en memoria aún no está implementado.'
+    );
+  },
+};
+
+const postgresRepository: InteractionRepository = {
+  create: createInteractionInPostgres,
+  findById: findInteractionInPostgres,
+  listByUser: listInteractionsInPostgres,
+};
+
+export const interactionsRepository: InteractionRepository =
+  env.nodeEnv === 'test'
+    ? memoryRepository
+    : postgresRepository;
+
+export function resetMemoryInteractionsRepository(): void {
+  resetInteractions();
 }

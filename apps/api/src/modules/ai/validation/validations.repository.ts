@@ -57,19 +57,37 @@ export async function listForInteraction(interactionId: number): Promise<AiValid
   return r.rows;
 }
 
-export async function markApplied(input: ApplyValidationInput): Promise<AiValidationRow> {
-  const pool = getPool();
-  const r = await pool.query<AiValidationRow>(
-    `UPDATE ai_validation
-        SET applied_at = now(), applied_by = $2, destination_id = COALESCE(destination_id, $3)
-      WHERE id = $1 AND applied_at IS NULL
-      RETURNING *`,
-    [input.validationId, input.appliedBy, input.destinationId]
+
+export async function markApplied(
+  input: ApplyValidationInput,
+): Promise<AiValidationRow> {
+  const result = await getPool().query<AiValidationRow>(
+    `
+      UPDATE ai_validation
+      SET
+        applied_at = NOW(),
+        applied_by = $2
+      WHERE id = $1
+        AND decision = 'approved'
+        AND applied_at IS NULL
+        AND destination_id = $3
+      RETURNING *
+    `,
+    [
+      input.validationId,
+      input.appliedBy,
+      input.destinationId,
+    ],
   );
-  if (!r.rows[0]) {
-    const existing = await findById(input.validationId);
-    if (!existing) throw new Error('validation_not_found');
-    return existing; 
+
+  const row = result.rows[0];
+
+  if (!row) {
+    throw new Error(
+      'La aprobación no existe, no está aprobada, ' +
+      'corresponde a otro destino o ya fue utilizada.',
+    );
   }
-  return r.rows[0];
+
+  return row;
 }
