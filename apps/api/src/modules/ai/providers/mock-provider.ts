@@ -28,4 +28,18 @@ export class MockAIProvider implements AIProvider {
       aiGenerated: true,
     };
   }
+
+  /** Simula la extracción de datos de un ticket sin IA real. */
+  async suggestTicketFields(description: string): Promise<any> {
+    // Simulamos que la IA analizó el texto
+    const isPrinter = description.toLowerCase().includes('impresora');
+    return {
+      title: isPrinter ? 'Problema con impresora' : 'Problema técnico reportado',
+      description: `[Organizado por IA] ${description}`,
+      categoryName: isPrinter ? 'Hardware' : null,
+      storeLocation: null, // Simulamos que la IA no encontró la tienda
+      motorcycleModel: null, // Simulamos que no encontró la moto
+      missingInformation: ['storeLocation', 'motorcycleModel'],
+    };
+  }
 }

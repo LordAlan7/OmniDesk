@@ -156,3 +156,22 @@ export async function applyInteraction(
   }
   return (await apiPage<ApplyResult>(`/ai/interactions/${interactionId}/apply`, { method: 'POST', body })).data
 }
+export interface TicketSuggestion {
+  title: string;
+  description: string;
+  categoryName: string | null;
+  storeLocation: string | null;
+  motorcycleModel: string | null;
+  missingInformation: string[];
+}
+
+export async function suggestTicketFields(description: string): Promise<TicketSuggestion> {
+  // 1. apiPage ya nos devuelve el objeto con { data: ... }
+  const response = await apiPage<TicketSuggestion>('/ai/ticket-suggestions', {
+    method: 'POST',
+    body: { description },
+  })
+
+  // 2. Por lo tanto, retornamos directamente response.data
+  return response.data
+}
