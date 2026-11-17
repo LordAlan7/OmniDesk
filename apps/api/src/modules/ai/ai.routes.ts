@@ -4,7 +4,6 @@ import { PERMISSIONS, requirePermission } from '../../shared/authorization';
 import { authenticate, currentUser } from '../../shared/security/guards';
 import { recordAudit } from '../audit';
 import { Errors } from '../../shared/errors';
-import { askSchema } from './ai.schemas';
 import {
   askWithAuthorizedSources,
   INSUFFICIENT_INFORMATION,
@@ -29,6 +28,8 @@ import { addInvestigation, resolveTicket } from '../tickets';
 import { assertAiValidated } from './validation/guard';
 import * as validationsService from './validation/validations.service';
 import { hashContent } from './validation/validations.service';
+import { askSchema, ticketSuggestionRequestSchema } from './ai.schemas';
+import { generateTicketSuggestion } from './ai.ticket-suggestions';
 
 export const aiRouter = Router();
 const REQUIREMENTS = ['FR-013', 'FR-014', 'FR-015', 'FR-021', 'NFR-003'];
@@ -381,4 +382,30 @@ aiRouter.post(
       next(cause);
     }
   },
+  
 );
+aiRouter.post(
+  '/ai/ticket-suggestions',
+  authenticate,
+  requirePermission(PERMISSIONS.AI_QUERY),
+  async (req, res, next) => {
+    try {
+      const parsed = ticketSuggestionRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw Errors.validation(
+          parsed.error.issues.map((issue) => ({
+            field: issue.path.join('.') || 'body',
+            message: issue.message,
+          })),
+        );
+      }
+
+      const { description } = parsed.data;
+      const suggestion = await generateTicketSuggestion(description);
+
+      ok(res, suggestion);
+    } catch (cause) {
+      next(cause);
+    }
+  }
+); // <--- Asegúrate de que este paréntesis y punto y coma estén aquí

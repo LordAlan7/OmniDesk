@@ -24,3 +24,20 @@ export const askSchema = z
     ticketId: z.coerce.number().int().positive().optional(),
   })
   .strict();
+
+// Esquema de entrada para cuando el usuario pide sugerencias
+export const ticketSuggestionRequestSchema = z.object({
+  description: z.string().min(10, 'La descripción es muy corta').max(2000),
+  // Opcional: si el usuario ya escribió algo, se lo pasamos a la IA
+  currentTitle: z.string().optional(),
+});
+
+// Esquema de salida estricto (lo que la IA DEBE devolver)
+export const aiTicketSuggestionSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  categoryName: z.string().nullable().describe('Nombre de la categoría inferida, si es clara'),
+  storeLocation: z.string().nullable(),
+  motorcycleModel: z.string().nullable(),
+  missingInformation: z.array(z.string()).describe('Campos que el usuario debe completar a mano'),
+});
