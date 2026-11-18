@@ -12,6 +12,35 @@ import {
 } from './ai.ticket-suggestions';
 import { Errors } from '../../shared/errors';
 
+// AIR-005: las pruebas HTTP no requieren PostgreSQL.
+// La persistencia real se prueba por separado.
+jest.mock('./interactions/interactions.service', () => {
+  const actual = jest.requireActual<
+    typeof import('./interactions/interactions.service')
+  >('./interactions/interactions.service');
+
+  let nextInteractionId = 100000;
+
+  return {
+    ...actual,
+    createSuggestionInteraction: jest.fn(async () => ({
+      id: ++nextInteractionId,
+    })),
+  };
+});
+
+jest.mock('./reviews/reviews', () => {
+  const actual = jest.requireActual<
+    typeof import('./reviews/reviews')
+  >('./reviews/reviews');
+
+  return {
+    ...actual,
+    recordReviewPersisted: jest.fn(async () => undefined),
+  };
+});
+
+
 async function loginForTest(email: string): Promise<string> {
   const response = await request(app)
     .post('/api/v1/auth/login')
