@@ -1,4 +1,5 @@
-﻿import {
+﻿
+import {
   buildAITransparency,
   transparencyForAuthorizedAnswer,
 } from './ai.transparency';
@@ -91,15 +92,22 @@ describe('NFR-003 - Transparencia de recomendaciones IA', () => {
     const result = transparencyForAuthorizedAnswer({
       status: 'answered',
       answer: 'Revisar la conexión del dispositivo.',
-      references: [{
-        authorizationId: 10,
-        sourceType: 'article',
-        sourceId: 7,
-        sourceVersion: '3',
-        title: 'Manual de soporte',
-        chunkIndex: 0,
-      }],
+      references: [
+        {
+          authorizationId: 10,
+          sourceType: 'article',
+          sourceId: 7,
+          sourceVersion: '3',
+          title: 'Manual de soporte',
+          chunkIndex: 0,
+        },
+      ],
       aiGenerated: true,
+
+      // AIR-007: Trazabilidad de respuestas de IA
+      providedContext: [],
+      citations: [],
+      generationConfig: {},
     });
 
     expect(result.status).toBe('supported');
