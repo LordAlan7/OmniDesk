@@ -1,3 +1,27 @@
+jest.mock('./reports.repository', () => ({
+  ...jest.requireActual('./reports.repository'),
+
+  getOverviewMetrics: jest.fn().mockResolvedValue({
+    total: 0,
+    open: 0,
+    assigned: 0,
+    inProgress: 0,
+    resolved: 0,
+    closed: 0,
+    overdue: 0,
+    unassigned: 0,
+    withoutPriority: 0,
+    byPriority: [],
+  }),
+
+  getDataQualityWarnings: jest.fn().mockResolvedValue([]),
+
+  getReportTickets: jest.fn().mockResolvedValue({
+    total: 0,
+    items: [],
+  }),
+}));
+
 import request from 'supertest';
 import { app, bearer, loginAs } from '../../test-helpers';
 

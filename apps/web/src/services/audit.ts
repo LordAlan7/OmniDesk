@@ -64,8 +64,12 @@ export async function getAuditCatalog(): Promise<AuditEventInfo[]> {
 /** Fecha con zona horaria identificable (p. ej. "21/10/2026, 14:05:09 GMT-6"). */
 export function formatDateTimeWithZone(value: string): string {
   return new Date(value).toLocaleString('es-MX', {
-    dateStyle: 'short',
-    timeStyle: 'medium',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
     timeZoneName: 'short',
   })
 }

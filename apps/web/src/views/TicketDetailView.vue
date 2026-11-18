@@ -2,13 +2,14 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../services/api'
+import QuotationPanel from '../components/QuotationPanel.vue'
 import {
   clearSession,
   hasPermission,
   sessionUser,
 } from '../services/session'
 import TicketTrackingPanel from '../components/TicketTrackingPanel.vue'
-import AiAssistantPanel from '../components/AiAssistantPanel.vue'
+import AssistantPanel from '../components/AssistantPanel.vue'
 import {
   addInvestigation,
   changeTicketStatus,
@@ -43,7 +44,6 @@ const route = useRoute()
 const router = useRouter()
 
 const ticket = ref<Ticket | null>(null)
-const canUseAssistantOnTicket = computed(() => hasPermission('ai:context:tickets'))
 const candidates = ref<TechnicianCandidate[]>([])
 const history = ref<TicketHistoryEntry[]>([])
 const priorities = ref<Priority[]>([])
@@ -228,7 +228,6 @@ function formatDate(value: string): string {
   return new Date(value).toLocaleString('es-MX', {
     dateStyle: 'short',
     timeStyle: 'medium',
-    timeZoneName: 'short',
   })
 }
 
@@ -942,12 +941,6 @@ watch(
 
         <TicketTrackingPanel :ticket="ticket" @changed="loadTicket" />
 
-        <!-- FR-013: consulta al asistente con el contexto autorizado de este ticket. -->
-        <section v-if="canUseAssistantOnTicket" class="card" data-testid="ticket-assistant">
-          <h2>Asistente técnico</h2>
-          <AiAssistantPanel :ticket-id="ticket.id" :ticket-title="ticket.title" />
-        </section>
-
         <!-- NFR-006 + FR-009: atención del ticket con requisitos de verificación. -->
         <section v-if="canStartWork || canResolve || canReopenWork" class="card technician-actions" :aria-busy="technicianBusy">
           <h2>Atención del ticket</h2>
@@ -1171,6 +1164,18 @@ watch(
             </li>
           </ol>
         </section>
+
+        <!-- AIR-001: Asistente de IA dentro del detalle del ticket (decisión 2).
+             El ticketId se pasa automáticamente (decisión 4). El permiso ai:query
+             lo decide el backend; aquí solo ocultamos la UI a quien no lo tenga. -->
+        <AssistantPanel
+          v-if="ticket && hasPermission('ai:query')"
+          :ticket-id="ticket.id"
+        />
+        <QuotationPanel
+          v-if="ticket && hasPermission('ai:query')"
+          :ticket-id="ticket.id"
+        />
       </template>
 
       <button v-if="error && !loading" @click="loadTicket">Reintentar</button>

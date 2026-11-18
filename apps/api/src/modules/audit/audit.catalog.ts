@@ -65,7 +65,7 @@ export const AUDIT_EVENTS = {
     historyAction: 'reopened',
   }),
   'ticket.attachment_uploaded': event('ticket', 'files', 'Archivo adjunto cargado.'),
-  
+
   // NUEVAS: FR-019 (Problemas recurrentes)
   'ticket.recurring_problem_linked': event('ticket', 'tickets', 'Problema recurrente vinculado al ticket.'),
   'ticket.recurring_problem_unlinked': event('ticket', 'tickets', 'Problema recurrente desvinculado del ticket.'),
@@ -89,15 +89,67 @@ export const AUDIT_EVENTS = {
   'ai.source_ingested': event('ai_source', 'ai', 'La versión autorizada se fragmentó para recuperación.'),
   'ai.source_ingestion_failed': event('ai_source', 'ai', 'Falló la extracción de la fuente autorizada; no se usa.', { outcome: 'rejected' }),
 
-  // IA (FR-013 / FR-015): reservados. Distinguen propuesta, revisión, aprobación y aplicación.
-  'ai.suggestion_generated': event('ai_interaction', 'ai', 'El asistente respondió una consulta (AIInteraction): recomendación, información insuficiente o aclaración.'),
-  'ai.suggestion_reviewed': event('ai_validation', 'ai', 'Una persona revisó la propuesta (AIValidation).', { implemented: false }),
-  'ai.suggestion_approved': event('ai_validation', 'ai', 'Una persona aprobó la propuesta.', { implemented: false }),
-  'ai.suggestion_rejected': event('ai_validation', 'ai', 'Una persona rechazó la propuesta.', { implemented: false }),
-  'ai.suggestion_applied': event('ai_interaction', 'ai', 'La propuesta aprobada se aplicó a un recurso.', { implemented: false }),
-  'ai.request_failed': event('ai_interaction', 'ai', 'Error relevante del proveedor de IA (sin claves ni contexto innecesario).', {
-    outcome: 'rejected',
+  // IA (AIR-001): propuesta generada por el asistente. El texto generado NO se
+  // persiste en auditoría; solo se guarda usuario, ticketId opcional, status y
+  // número de referencias (AIR-007).
+  'ai.suggestion_generated': event('ai_interaction', 'ai', 'La IA generó una propuesta (AIR-001).', {
+    valuesInAudit: false,
   }),
+
+  // IA (AIR-004): revisión humana de la recomendación. Se registra en cada
+  // decisión (incluida la actualización de una decisión previa: supersedesId en
+  // metadata). Sin texto de la recomendación ni claves; el contenido vivirá en
+  // FR-015 cuando se persista, no aquí (valuesInAudit=false).
+  'ai.suggestion_reviewed': event('ai_validation', 'ai', 'Una persona revisó la propuesta (AIR-004).', {
+    valuesInAudit: false,
+  }),
+  'ai.suggestion_approved': event('ai_validation', 'ai', 'Una persona aprobó la propuesta (AIR-004).', {
+    valuesInAudit: false,
+  }),
+  'ai.suggestion_rejected': event('ai_validation', 'ai', 'Una persona rechazó la propuesta (AIR-004).', {
+    outcome: 'rejected',
+    valuesInAudit: false,
+  }),
+  'ai.validation_applied': event('ai_validation', 'ai', 'Se aplicó al destino una propuesta validada (AIR-006).', {
+  /* campos requeridos: interactionId, validationId, destinationType, destinationId */
+  }),
+  // AIR-004 + FR-009: la recomendación aprobada se aplicó al ticket (a una
+  // investigación o a la resolución). El guardado lo hace FR-009; aquí sólo
+  // enlazamos la interacción con el ticket y el resultado (saved id).
+  'ai.suggestion_applied': event('ai_interaction', 'ai', 'La propuesta aprobada se aplicó a un recurso (AIR-004 + FR-009).', {
+    valuesInAudit: false,
+  }),
+  // AIR-009: fallo del proveedor de IA.
+  'ai.request_failed': event('ai_interaction', 'ai', 'Error del proveedor de IA al generar respuesta.', {
+    outcome: 'rejected',
+    valuesInAudit: false,
+  }),
+
+  // AIR-005: sugerencia de campos para un ticket a partir de la descripción
+  // libre. El texto sugerido NO se persiste en auditoría; solo se registra
+  // usuario, número de campos faltantes y categoría inferida (si la hubo).
+  // El contenido vive en el almacén de sugerencias y en el ticket que se cree.
+  'ai.ticket_suggestion_generated': event('ai_ticket_suggestion', 'ai', 'La IA propuso campos para un ticket (AIR-005).', {
+    valuesInAudit: false,
+  }),
+  // AIR-005: el usuario confirmó (posiblemente editada) la sugerencia. Esto es
+  // la prueba de revisión humana antes de crear/actualizar el ticket. No se
+  // persiste el texto, solo los ids y metadatos mínimos.
+  'ai.ticket_suggestion_confirmed': event('ai_ticket_suggestion', 'ai', 'El usuario confirmó la sugerencia de ticket (AIR-005).', {
+    valuesInAudit: false,
+  }),
+  // AIR-005: la sugerencia confirmada se materializó en un ticket (nuevo o
+  // actualizado). `metadata.mode` indica 'create' | 'update'; el cambio real
+  // del ticket genera además su propio evento 'ticket.created'/'ticket.updated'.
+  'ai.ticket_suggestion_applied': event('ai_ticket_suggestion', 'ai', 'La sugerencia confirmada se aplicó a un ticket (AIR-005).', {
+    valuesInAudit: false,
+  }),
+  'quotation.reviewed': event(
+    'quotation',
+    'ai',
+    'Una persona revisó una versión de cotización.',
+    { valuesInAudit: false },
+  ),
 } as const satisfies Record<string, AuditEventDefinition>;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

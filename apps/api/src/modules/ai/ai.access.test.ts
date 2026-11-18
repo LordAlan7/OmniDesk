@@ -7,7 +7,7 @@ import { buildTicketContext } from './context/ticket-context';
 import { getInteractionForUser, recordInteraction, resetInteractions } from './interactions/interactions';
 import type { AIAnswer, AIContextItem, AIProvider } from './providers/ai-provider';
 import { retrieveAuthorizedContext } from './sources/retrieval';
-import type { SourceReference } from './sources/sources.types';
+import { sourcesRepository } from './sources/sources.repository';
 
 const user = (id: number, roles: Role[]): AuthUser => ({ id, email: `u${id}@company.com`, name: `u${id}`, roles });
 const employee = user(1, ['Employee']);
@@ -21,7 +21,23 @@ class SpyProvider implements AIProvider {
   calls: { question: string; context: AIContextItem[] }[] = [];
   async ask(question: string, context: AIContextItem[]): Promise<AIAnswer> {
     this.calls.push({ question, context });
-    return { text: 'respuesta', sources: [], aiGenerated: true };
+    const citations = context
+      .filter((item) =>
+        item.sourceType !== 'ticket' &&
+        Number.isSafeInteger(item.authorizationId) &&
+        Number.isSafeInteger(item.chunkIndex)
+      )
+      .map((item) => ({
+        authorizationId: item.authorizationId!,
+        chunkIndex: item.chunkIndex!,
+      }));
+
+    return {
+      text: 'respuesta',
+      sources: [],
+      citations,
+      aiGenerated: true,
+    };
   }
 }
 
@@ -67,12 +83,6 @@ describe('AIR-008 - access control for the assistant', () => {
   });
 
   beforeEach(() => resetInteractions());
-
-  const seed = (data: { userId: number; question: string; answer: string; references: SourceReference[] }) =>
-    recordInteraction(
-      { ticketId: null, condition: 'recommendation', steps: [], additionalInformation: [], failureCode: null, provider: 'mock', model: null, durationMs: 1, ...data },
-      { action: 'ai.suggestion_generated', entity: 'ai_interaction', actorId: data.userId },
-    );
 
   describe('authorization matrix', () => {
     it('using the assistant does not grant ticket context, other people\'s conversations or applying results', () => {
@@ -174,17 +184,17 @@ describe('AIR-008 - access control for the assistant', () => {
   });
 
   describe('interactions and history', () => {
-    const reference = (authorizationId: number, sourceId: number) => ({
+    const reference = (authorizationId: number, sourceId: number, sourceVersion: string) => ({
       authorizationId,
       sourceType: 'article' as const,
       sourceId,
-      sourceVersion: '1',
+      sourceVersion,
       title: 'Fuente',
       chunkIndex: 0,
     });
 
     it('only the owner opens an interaction; manipulated ids look like missing ones', async () => {
-      const mine = await seed({ userId: employee.id, question: 'pregunta', answer: 'respuesta', references: [] });
+      const mine = recordInteraction({ userId: employee.id, question: 'pregunta', answer: 'respuesta', references: [] });
 
       expect(await getInteractionForUser(mine.id, employee)).toMatchObject({ status: 'available' });
       await expect(getInteractionForUser(mine.id, otherEmployee)).rejects.toMatchObject({ status: 404 });
@@ -193,11 +203,16 @@ describe('AIR-008 - access control for the assistant', () => {
 
     it('does not show stored text again when a referenced source was withdrawn', async () => {
       const { authorizationId, articleId } = await authorizedArticle('Lector de código', 'Limpiar la lente del lector de código.');
-      const stored = await seed({
+      const approvedSource = await sourcesRepository.findById(authorizationId);
+
+      if (!approvedSource || approvedSource.status !== 'approved') {
+        throw new Error('La fuente no está autorizada para esta prueba.');
+      }
+      const stored = recordInteraction({
         userId: technician.id,
         question: 'lector',
         answer: 'texto generado con contenido que luego se retira',
-        references: [reference(authorizationId, articleId)],
+        references: [reference(authorizationId, articleId, approvedSource.sourceVersion)],
       });
 
       expect(await getInteractionForUser(stored.id, technician)).toMatchObject({ status: 'available' });
@@ -210,7 +225,7 @@ describe('AIR-008 - access control for the assistant', () => {
     });
 
     it('serves interactions over HTTP only to the owner', async () => {
-      const mine = await seed({ userId: 2, question: 'q', answer: 'a', references: [] });
+      const mine = recordInteraction({ userId: 2, question: 'q', answer: 'a', references: [] });
       expect((await api('get', `/ai/interactions/${mine.id}`, techToken)).status).toBe(200);
       expect((await api('get', `/ai/interactions/${mine.id}`, employeeToken)).status).toBe(404);
       expect((await api('get', '/ai/interactions/abc', techToken)).status).toBe(400);

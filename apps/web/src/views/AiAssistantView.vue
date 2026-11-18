@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AiAssistantPanel from '@/components/AiAssistantPanel.vue'
+import AssistantPanel from '@/components/AssistantPanel.vue'
 </script>
 
 <template>
@@ -9,7 +9,7 @@ import AiAssistantPanel from '@/components/AiAssistantPanel.vue'
       Recibe recomendaciones de diagnóstico basadas en el conocimiento autorizado de la organización. Las respuestas
       las genera una IA y deben ser revisadas por una persona antes de usarse. El asistente no modifica tickets.
     </p>
-    <AiAssistantPanel />
+    <AssistantPanel />
   </section>
 </template>
 

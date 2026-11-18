@@ -1,8 +1,8 @@
-
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ApiError } from '../services/api'
+import { suggestTicketFields, type TicketSuggestion } from '../services/aiAssistant'
 import {
   createTicket,
   getCategories,
@@ -17,6 +17,11 @@ const successId = ref<number | null>(null)
 // Categorías
 const categories = ref<Category[]>([])
 const loadingCategories = ref(true)
+
+// Estados de la IA
+const generatingAI = ref(false)
+const aiSuggestion = ref<TicketSuggestion | null>(null)
+const aiError = ref('')
 
 // Formulario
 const form = reactive({
@@ -113,6 +118,8 @@ function resetForm() {
   form.motorcycleModel = ''
 
   clearErrors()
+  aiSuggestion.value = null
+  aiError.value = ''
 }
 
 // Crear otro ticket
@@ -120,6 +127,47 @@ function createAnotherTicket() {
   successId.value = null
   error.value = ''
   resetForm()
+}
+
+// --- LÓGICA DE LA IA ---
+
+async function handleAISuggestion() {
+  console.log('¡Hice clic en el botón de IA!', form.description)
+  if (!form.description.trim()) {
+    aiError.value = 'Escribe una descripción primero para que la IA pueda ayudarte.'
+    return
+  }
+  
+  generatingAI.value = true
+  aiError.value = ''
+  aiSuggestion.value = null
+  
+  try {
+    const suggestion = await suggestTicketFields(form.description)
+    aiSuggestion.value = suggestion
+  } catch (err) {
+    console.error('Error al generar sugerencia:', err) 
+    aiError.value = 'No se pudo generar la sugerencia. Intenta de nuevo o continúa manualmente.'
+  } finally {
+    generatingAI.value = false
+  }
+}
+
+function applyAISuggestion() {
+  if (!aiSuggestion.value) return
+  
+  if (aiSuggestion.value.title) form.title = aiSuggestion.value.title
+  if (aiSuggestion.value.description) form.description = aiSuggestion.value.description
+  if (aiSuggestion.value.storeLocation) form.storeLocation = aiSuggestion.value.storeLocation
+  if (aiSuggestion.value.motorcycleModel) form.motorcycleModel = aiSuggestion.value.motorcycleModel
+  
+  // Buscamos la categoría por nombre
+  if (aiSuggestion.value.categoryName) {
+    const cat = categories.value.find(c => c.name.toLowerCase().includes(aiSuggestion.value!.categoryName!.toLowerCase()))
+    if (cat) form.categoryId = cat.id
+  }
+  
+  aiSuggestion.value = null // Cerramos el panel
 }
 
 // Enviar formulario
@@ -186,7 +234,6 @@ async function submit() {
       await focusFirstError()
     }
 
-    // Los datos escritos se conservan cuando hay errores
   } finally {
     saving.value = false
   }
@@ -208,98 +255,37 @@ onMounted(loadCategories)
         aria-live="polite"
       >
         <h1>¡Ticket creado con éxito!</h1>
-
-        <p>
-          Tu solicitud de soporte se registró correctamente.
-        </p>
-
-        <p>
-          Puedes consultar el seguimiento de tu ticket
-          desde la sección Mis tickets.
-        </p>
-
-        <div class="ticket-id">
-          #TK-{{ successId }}
-        </div>
-
+        <p>Tu solicitud de soporte se registró correctamente.</p>
+        <p>Puedes consultar el seguimiento de tu ticket desde la sección Mis tickets.</p>
+        <div class="ticket-id">#TK-{{ successId }}</div>
         <div class="actions">
-          <RouterLink
-            to="/my-tickets"
-            class="btn btn-primary"
-          >
-            Ver mis tickets
-          </RouterLink>
-
-          <button
-            type="button"
-            class="btn btn-secondary"
-            @click="createAnotherTicket"
-          >
-            Crear otro ticket
-          </button>
+          <RouterLink to="/my-tickets" class="btn btn-primary">Ver mis tickets</RouterLink>
+          <button type="button" class="btn btn-secondary" @click="createAnotherTicket">Crear otro ticket</button>
         </div>
       </div>
 
       <!-- Formulario -->
       <div v-else>
-
-        <RouterLink
-          to="/tickets"
-          class="back-link"
-        >
-          ← Volver a tickets
-        </RouterLink>
-
+        <RouterLink to="/tickets" class="back-link">← Volver a tickets</RouterLink>
         <h1>Crear ticket de soporte</h1>
-
-        <p class="description">
-          Completa la información para reportar
-          tu problema técnico.
-        </p>
-
-        <p class="required-info">
-          Los campos marcados con * son obligatorios.
-        </p>
+        <p class="description">Completa la información para reportar tu problema técnico.</p>
+        <p class="required-info">Los campos marcados con * son obligatorios.</p>
 
         <!-- Carga de categorías -->
-        <p
-          v-if="loadingCategories"
-          class="loading-message"
-          role="status"
-        >
-          Cargando categorías disponibles...
-        </p>
+        <p v-if="loadingCategories" class="loading-message" role="status">Cargando categorías disponibles...</p>
 
         <!-- Error al cargar categorías -->
-        <div
-          v-else-if="error && categories.length === 0"
-          class="error-box"
-          role="alert"
-        >
+        <div v-else-if="error && categories.length === 0" class="error-box" role="alert">
           <p>{{ error }}</p>
-
-          <button
-            type="button"
-            class="btn btn-secondary"
-            @click="loadCategories"
-          >
-            Intentar nuevamente
-          </button>
+          <button type="button" class="btn btn-secondary" @click="loadCategories">Intentar nuevamente</button>
         </div>
 
         <!-- Formulario principal -->
-        <form
-          v-else
-          @submit.prevent="submit"
-          novalidate
-        >
+        <form v-else @submit.prevent="submit" novalidate>
 
           <!-- Título -->
           <div class="form-group">
-            <label for="title">
-              Título del problema *
-            </label>
-
+            <label for="title">Título del problema *</label>
             <input
               id="title"
               v-model="form.title"
@@ -309,28 +295,14 @@ onMounted(loadCategories)
               placeholder="Ej. La motocicleta no enciende"
               :disabled="saving"
               :aria-invalid="!!fieldErrors.title"
-              :aria-describedby="
-                fieldErrors.title
-                  ? 'title-error'
-                  : undefined
-              "
+              :aria-describedby="fieldErrors.title ? 'title-error' : undefined"
             />
-
-            <span
-              v-if="fieldErrors.title"
-              id="title-error"
-              class="error-text"
-            >
-              {{ fieldErrors.title }}
-            </span>
+            <span v-if="fieldErrors.title" id="title-error" class="error-text">{{ fieldErrors.title }}</span>
           </div>
 
           <!-- Descripción -->
           <div class="form-group">
-            <label for="description">
-              Descripción detallada *
-            </label>
-
+            <label for="description">Descripción detallada *</label>
             <textarea
               id="description"
               v-model="form.description"
@@ -338,73 +310,81 @@ onMounted(loadCategories)
               maxlength="5000"
               :disabled="saving"
               :aria-invalid="!!fieldErrors.description"
-              :aria-describedby="
-                fieldErrors.description
-                  ? 'description-error'
-                  : undefined
-              "
+              :aria-describedby="fieldErrors.description ? 'description-error' : undefined"
               placeholder="Describe qué ocurrió, cuándo comenzó el problema y qué intentaste hacer."
             ></textarea>
+            <span v-if="fieldErrors.description" id="description-error" class="error-text">{{ fieldErrors.description }}</span>
+            
+            <!-- Botón de IA debajo de la descripción -->
+            <div style="margin-top: 8px; display: flex; align-items: center; gap: 12px;">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                @click="handleAISuggestion"
+                :disabled="generatingAI || saving || !form.description.trim()"
+                style="display: inline-flex; align-items: center; gap: 6px;"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                </svg>
+                {{ generatingAI ? 'Generando sugerencia...' : 'Organizar con IA' }}
+              </button>
+            </div>
+            <p v-if="aiError" class="error-text" style="margin-top: 8px;">{{ aiError }}</p>
+          </div>
 
-            <span
-              v-if="fieldErrors.description"
-              id="description-error"
-              class="error-text"
-            >
-              {{ fieldErrors.description }}
-            </span>
+          <!-- Panel de revisión de IA -->
+          <div v-if="aiSuggestion" class="ai-suggestion-card">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+              </svg>
+              <h3 style="margin: 0; color: #166534; font-size: 16px;">Propuesta generada por IA</h3>
+            </div>
+            
+            <p style="font-size: 13px; color: #15803d; margin-bottom: 12px;">Revisa que los datos sean correctos antes de aplicarlos. Puedes editarlos después.</p>
+            
+            <ul style="font-size: 14px; margin-bottom: 16px; padding-left: 20px; line-height: 1.6;">
+              <li><strong>Título:</strong> {{ aiSuggestion.title }}</li>
+              <li><strong>Descripción:</strong> {{ aiSuggestion.description }}</li>
+              <li><strong>Categoría:</strong> {{ aiSuggestion.categoryName || 'No detectada' }}</li>
+              <li v-if="aiSuggestion.storeLocation"><strong>Ubicación:</strong> {{ aiSuggestion.storeLocation }}</li>
+              <li v-if="aiSuggestion.motorcycleModel"><strong>Motocicleta:</strong> {{ aiSuggestion.motorcycleModel }}</li>
+            </ul>
+
+            <div v-if="aiSuggestion.missingInformation.length > 0" style="background: #fef2f2; border: 1px solid #fecaca; padding: 10px; border-radius: 6px; margin-bottom: 16px;">
+              <p style="color: #b91c1c; font-size: 13px; margin: 0;">
+                <strong>Campos faltantes:</strong> La IA no pudo extraer esta información. Por favor, complétala manualmente: 
+                {{ aiSuggestion.missingInformation.join(', ') }}
+              </p>
+            </div>
+            
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn btn-primary" @click="applyAISuggestion">Aplicar al formulario</button>
+              <button type="button" class="btn btn-secondary" @click="aiSuggestion = null">Descartar</button>
+            </div>
           </div>
 
           <div class="form-row">
-
             <!-- Categoría -->
             <div class="form-group">
-              <label for="categoryId">
-                Tipo de problema / Categoría *
-              </label>
-
+              <label for="categoryId">Tipo de problema / Categoría *</label>
               <select
                 id="categoryId"
                 v-model="form.categoryId"
                 :disabled="saving"
                 :aria-invalid="!!fieldErrors.categoryId"
-                :aria-describedby="
-                  fieldErrors.categoryId
-                    ? 'categoryId-error'
-                    : undefined
-                "
+                :aria-describedby="fieldErrors.categoryId ? 'categoryId-error' : undefined"
               >
-                <option
-                  :value="0"
-                  disabled
-                >
-                  Selecciona una categoría
-                </option>
-
-                <option
-                  v-for="cat in categories"
-                  :key="cat.id"
-                  :value="cat.id"
-                >
-                  {{ cat.name }}
-                </option>
+                <option :value="0" disabled>Selecciona una categoría</option>
+                <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
               </select>
-
-              <span
-                v-if="fieldErrors.categoryId"
-                id="categoryId-error"
-                class="error-text"
-              >
-                {{ fieldErrors.categoryId }}
-              </span>
+              <span v-if="fieldErrors.categoryId" id="categoryId-error" class="error-text">{{ fieldErrors.categoryId }}</span>
             </div>
 
             <!-- Ubicación -->
             <div class="form-group">
-              <label for="storeLocation">
-                Tienda o ubicación *
-              </label>
-
+              <label for="storeLocation">Tienda o ubicación *</label>
               <input
                 id="storeLocation"
                 v-model="form.storeLocation"
@@ -414,28 +394,14 @@ onMounted(loadCategories)
                 placeholder="Ej. Sucursal Centro"
                 :disabled="saving"
                 :aria-invalid="!!fieldErrors.storeLocation"
-                :aria-describedby="
-                  fieldErrors.storeLocation
-                    ? 'storeLocation-error'
-                    : undefined
-                "
+                :aria-describedby="fieldErrors.storeLocation ? 'storeLocation-error' : undefined"
               />
-
-              <span
-                v-if="fieldErrors.storeLocation"
-                id="storeLocation-error"
-                class="error-text"
-              >
-                {{ fieldErrors.storeLocation }}
-              </span>
+              <span v-if="fieldErrors.storeLocation" id="storeLocation-error" class="error-text">{{ fieldErrors.storeLocation }}</span>
             </div>
 
             <!-- Modelo -->
             <div class="form-group">
-              <label for="motorcycleModel">
-                Modelo de motocicleta *
-              </label>
-
+              <label for="motorcycleModel">Modelo de motocicleta *</label>
               <input
                 id="motorcycleModel"
                 v-model="form.motorcycleModel"
@@ -445,44 +411,20 @@ onMounted(loadCategories)
                 placeholder="Ej. Italika FT150"
                 :disabled="saving"
                 :aria-invalid="!!fieldErrors.motorcycleModel"
-                :aria-describedby="
-                  fieldErrors.motorcycleModel
-                    ? 'motorcycleModel-error'
-                    : undefined
-                "
+                :aria-describedby="fieldErrors.motorcycleModel ? 'motorcycleModel-error' : undefined"
               />
-
-              <span
-                v-if="fieldErrors.motorcycleModel"
-                id="motorcycleModel-error"
-                class="error-text"
-              >
-                {{ fieldErrors.motorcycleModel }}
-              </span>
+              <span v-if="fieldErrors.motorcycleModel" id="motorcycleModel-error" class="error-text">{{ fieldErrors.motorcycleModel }}</span>
             </div>
-
           </div>
 
           <!-- Error general -->
-          <div
-            v-if="error"
-            class="error-box"
-            role="alert"
-          >
-            {{ error }}
-          </div>
+          <div v-if="error" class="error-box" role="alert">{{ error }}</div>
 
           <!-- Acciones -->
           <div class="actions">
-            <button
-              type="submit"
-              class="btn btn-primary"
-              :disabled="saving"
-              :aria-busy="saving"
-            >
+            <button type="submit" class="btn btn-primary" :disabled="saving" :aria-busy="saving">
               {{ saving ? 'Guardando ticket...' : 'Crear ticket' }}
             </button>
-
             <RouterLink
               to="/tickets"
               class="btn btn-secondary"
@@ -494,15 +436,7 @@ onMounted(loadCategories)
             </RouterLink>
           </div>
 
-          <p
-            v-if="saving"
-            class="loading-message"
-            role="status"
-          >
-            Estamos registrando tu solicitud.
-            No cierres esta página mientras se guarda.
-          </p>
-
+          <p v-if="saving" class="loading-message" role="status">Estamos registrando tu solicitud. No cierres esta página mientras se guarda.</p>
         </form>
       </div>
     </div>
@@ -510,6 +444,7 @@ onMounted(loadCategories)
 </template>
 
 <style scoped>
+/* ... Conserva tus estilos originales ... */
 .page {
   min-height: 100vh;
   padding: 32px 16px;
@@ -710,6 +645,15 @@ textarea {
   color: #4f46e5;
   margin: 20px 0;
   font-family: 'JetBrains Mono', monospace;
+}
+
+/* Estilos específicos para la tarjeta de IA */
+.ai-suggestion-card {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 24px;
 }
 
 @media (max-width: 768px) {

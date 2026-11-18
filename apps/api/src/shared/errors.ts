@@ -26,4 +26,11 @@ export const Errors = {
   notFound: (what = 'Resource') => new AppError(404, 'NOT_FOUND', `${what} was not found.`),
   conflict: (message: string) => new AppError(409, 'CONFLICT', message),
   invalidState: (message: string) => new AppError(409, 'INVALID_STATE', message),
+  /**
+   * AIR-001: fallo de un proveedor externo (OpenAI). No expone detalles del
+   * proveedor al cliente; el mensaje es neutro. El incidente se audita por
+   * separado como `ai.request_failed` (AIR-009).
+   */
+  badGateway: (message = 'External service is unavailable. Try again later.') =>
+    new AppError(502, 'BAD_GATEWAY', message),
 };

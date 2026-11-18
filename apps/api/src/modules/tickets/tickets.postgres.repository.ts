@@ -1,3 +1,9 @@
+import { applyAiCreationValidationInTransaction, type AiCreationApproval } from '../../shared/db/ai-validation';
+
+import {
+  applyAiValidationInTransaction,
+  type AiApplicationApproval,
+} from '../../shared/db/ai-validation';
 import { assertStatusInvariants } from './tickets.lifecycle';
 import { Errors } from '../../shared/errors';
 import { getPool } from '../../shared/db/pool';
@@ -54,6 +60,18 @@ type HistoryInput = Omit<
   'id' | 'createdAt' | 'ticketId'
 >;
 
+interface InvestigationRow {
+  id: number;
+  ticket_id: number;
+  author_id: number;
+  activity: string;
+  result: string;
+  knowledge_article_id: number | null;
+  created_at: Date;
+  author_name: string;
+  knowledge_article_title: string | null;
+}
+
 function toTicket(row: TicketRow): Ticket {
   return {
     id: row.id,
@@ -80,19 +98,9 @@ function toTicket(row: TicketRow): Ticket {
   };
 }
 
-interface InvestigationRow {
-  id: number;
-  ticket_id: number;
-  author_id: number;
-  activity: string;
-  result: string;
-  knowledge_article_id: number | null;
-  created_at: Date;
-  author_name: string;
-  knowledge_article_title: string | null;
-}
-
-function toInvestigation(row: InvestigationRow): TicketInvestigation {
+function toInvestigation(
+  row: InvestigationRow,
+): TicketInvestigation {
   return {
     id: row.id,
     ticketId: row.ticket_id,
@@ -107,14 +115,38 @@ function toInvestigation(row: InvestigationRow): TicketInvestigation {
 }
 
 export const postgresTicketsRepository = {
-  async listCategories(): Promise<{ id: number; name: string }[]> {
-    const result = await getPool().query<{ id: number; name: string }>('SELECT id, name FROM ticket_categories ORDER BY id');
+  async listCategories(): Promise<
+    { id: number; name: string }[]
+  > {
+    const result = await getPool().query<{
+      id: number;
+      name: string;
+    }>(
+      'SELECT id, name FROM ticket_categories ORDER BY id',
+    );
+
     return result.rows;
   },
-  async listPriorities(): Promise<{ id: number; name: string; description: string; sortOrder: number }[]> {
-    const result = await getPool().query<{ id: number; name: string; description: string; sort_order: number }>(
-      'SELECT id, name, description, sort_order FROM ticket_priorities ORDER BY sort_order ASC',
+
+  async listPriorities(): Promise<
+    {
+      id: number;
+      name: string;
+      description: string;
+      sortOrder: number;
+    }[]
+  > {
+    const result = await getPool().query<{
+      id: number;
+      name: string;
+      description: string;
+      sort_order: number;
+    }>(
+      `SELECT id, name, description, sort_order
+       FROM ticket_priorities
+       ORDER BY sort_order ASC`,
     );
+
     return result.rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -122,12 +154,18 @@ export const postgresTicketsRepository = {
       sortOrder: row.sort_order,
     }));
   },
+
   async create(
     data: Pick<
       Ticket,
-      'title' | 'description' | 'categoryId' | 'createdBy' | 'storeLocation' | 'motorcycleModel'
+      | 'title'
+      | 'description'
+      | 'categoryId'
+      | 'createdBy'
+      | 'storeLocation'
+      | 'motorcycleModel'
     >,
-  ): Promise<Ticket> {
+  aiValidation?: AiCreationApproval): Promise<Ticket> {
     const client = await getPool().connect();
 
     try {
@@ -135,7 +173,12 @@ export const postgresTicketsRepository = {
 
       const result = await client.query<TicketRow>(
         `INSERT INTO tickets (
-           title, description, category_id, created_by, store_location, motorcycle_model
+           title,
+           description,
+           category_id,
+           created_by,
+           store_location,
+           motorcycle_model
          )
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
@@ -157,7 +200,11 @@ export const postgresTicketsRepository = {
 
       await client.query(
         `INSERT INTO ticket_history (
-           ticket_id, actor_id, action, to_value, correlation_id
+           ticket_id,
+           actor_id,
+           action,
+           to_value,
+           correlation_id
          )
          VALUES ($1, $2, $3, $4::jsonb, $5)`,
         [
@@ -177,8 +224,18 @@ export const postgresTicketsRepository = {
         metadata: { to: 'Open' },
       });
 
+      if (aiValidation) {
+        await applyAiCreationValidationInTransaction(client, {
+          ...aiValidation,
+          destinationId: row.id,
+        });
+      }
+
+      const saved = toTicket(row);
+
       await client.query('COMMIT');
-      return toTicket(row);
+
+      return saved;
     } catch (cause) {
       await client.query('ROLLBACK');
 
@@ -204,13 +261,22 @@ export const postgresTicketsRepository = {
     }
   },
 
+  /**
+   * FR-008 + FR-009 + AIR-006
+   *
+   * Actualiza el ticket, su historial, auditoría
+   * y notificaciones en una sola transacción.
+   * Consume la aprobación IA cuando corresponde.
+   */
   async saveWithHistory(
     ticket: Ticket,
     expectedVersion: number,
     entries: HistoryInput[],
     saveContext?: SaveContext,
+    aiValidation?: AiApplicationApproval,
   ): Promise<Ticket> {
     assertStatusInvariants(ticket);
+
     const client = await getPool().connect();
 
     try {
@@ -239,24 +305,24 @@ export const postgresTicketsRepository = {
          WHERE id = $11 AND version = $12
          RETURNING *`,
         [
-          ticket.title,                    // $1
-          ticket.description,              // $2
-          ticket.categoryId,               // $3
-          ticket.priorityId,               // $4
-          ticket.status,                   // $5
-          ticket.assignedTechnicianId,     // $6
-          ticket.dueDate,                  // $7
-          ticket.resolution,               // $8
-          ticket.resolvedAt,               // $9
-          ticket.closedAt,                  // $10
-          ticket.id,                       // $11 (WHERE)
-          expectedVersion,                  // $12 (WHERE)
-          ticket.storeLocation,             // $13
-          ticket.motorcycleModel,           // $14
-          ticket.resolutionVerification,    // $15
-          ticket.rootCause,                 // $16
-          ticket.resolutionObservations,    // $17
-          ticket.knowledgeArticleId,         // $18
+          ticket.title,
+          ticket.description,
+          ticket.categoryId,
+          ticket.priorityId,
+          ticket.status,
+          ticket.assignedTechnicianId,
+          ticket.dueDate,
+          ticket.resolution,
+          ticket.resolvedAt,
+          ticket.closedAt,
+          ticket.id,
+          expectedVersion,
+          ticket.storeLocation,
+          ticket.motorcycleModel,
+          ticket.resolutionVerification,
+          ticket.rootCause,
+          ticket.resolutionObservations,
+          ticket.knowledgeArticleId,
         ],
       );
 
@@ -291,30 +357,55 @@ export const postgresTicketsRepository = {
           ],
         );
 
-        // NFR-009: el evento de auditoría se confirma (o revierte) junto con el cambio.
-        const audit = ticketAuditFor(ticket.id, entry);
-        if (audit) await recordAuditInTransaction(client, audit);
+        const audit = ticketAuditFor(
+          ticket.id,
+          entry,
+        );
 
-        // FR-020: notificación dentro de la misma transacción (si hay contexto).
+        if (audit) {
+          await recordAuditInTransaction(
+            client,
+            audit,
+          );
+        }
+
         if (saveContext) {
           await notifyInTransaction(client, {
-            actor: { id: saveContext.actorId, email: '', name: '', roles: [] },
+            actor: {
+              id: saveContext.actorId,
+              email: '',
+              name: '',
+              roles: [],
+            },
             next: {
               id: ticket.id,
               createdBy: ticket.createdBy,
-              assignedTechnicianId: ticket.assignedTechnicianId,
+              assignedTechnicianId:
+                ticket.assignedTechnicianId,
               status: ticket.status,
             },
-            previousAssigneeId: saveContext.previousAssigneeId,
+            previousAssigneeId:
+              saveContext.previousAssigneeId,
             historyAction: entry.action,
           });
         }
       }
 
+      if (aiValidation) {
+        await applyAiValidationInTransaction(
+          client,
+          aiValidation,
+        );
+      }
+
+      const saved = toTicket(row);
+
       await client.query('COMMIT');
-      return toTicket(row);
+
+      return saved;
     } catch (cause) {
       await client.query('ROLLBACK');
+
       if (
         typeof cause === 'object' &&
         cause !== null &&
@@ -346,10 +437,13 @@ export const postgresTicketsRepository = {
     );
 
     const row = result.rows[0];
+
     return row ? toTicket(row) : undefined;
   },
 
-  async list(filter: TicketFilter): Promise<Ticket[]> {
+  async list(
+    filter: TicketFilter,
+  ): Promise<Ticket[]> {
     const result = await getPool().query<TicketRow>(
       `SELECT *
        FROM tickets
@@ -373,39 +467,69 @@ export const postgresTicketsRepository = {
     return result.rows.map(toTicket);
   },
 
-  /** Evento de historial sin modificar el ticket (p. ej. notas de avance, FR-008). Historial y auditoría van en una transacción. */
+  /**
+   * FR-008: evento de historial sin modificar
+   * el ticket. Historial y auditoría son atómicos.
+   */
   async addHistory(
-    entry: Omit<TicketHistoryEntry, 'id' | 'createdAt'>,
+    entry: Omit<
+      TicketHistoryEntry,
+      'id' | 'createdAt'
+    >,
   ): Promise<TicketHistoryEntry> {
     const client = await getPool().connect();
 
     try {
       await client.query('BEGIN');
 
-      const result = await client.query<HistoryRow>(
-        `INSERT INTO ticket_history (
-           ticket_id, actor_id, action, from_value, to_value, reason, correlation_id
-         )
-         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
-         RETURNING *`,
-        [
-          entry.ticketId,
-          entry.actorId,
-          entry.action,
-          JSON.stringify(entry.from ?? null),
-          JSON.stringify(entry.to ?? null),
-          entry.reason ?? null,
-          currentCorrelationId(),
-        ],
+      const result =
+        await client.query<HistoryRow>(
+          `INSERT INTO ticket_history (
+             ticket_id,
+             actor_id,
+             action,
+             from_value,
+             to_value,
+             reason,
+             correlation_id
+           )
+           VALUES (
+             $1, $2, $3,
+             $4::jsonb, $5::jsonb, $6, $7
+           )
+           RETURNING *`,
+          [
+            entry.ticketId,
+            entry.actorId,
+            entry.action,
+            JSON.stringify(entry.from ?? null),
+            JSON.stringify(entry.to ?? null),
+            entry.reason ?? null,
+            currentCorrelationId(),
+          ],
+        );
+
+      const audit = ticketAuditFor(
+        entry.ticketId,
+        entry,
       );
 
-      const audit = ticketAuditFor(entry.ticketId, entry);
-      if (audit) await recordAuditInTransaction(client, audit);
+      if (audit) {
+        await recordAuditInTransaction(
+          client,
+          audit,
+        );
+      }
 
-      await client.query('COMMIT');
+      const row = result.rows[0];
 
-      const row = result.rows[0]!;
-      return {
+      if (!row) {
+        throw new Error(
+          'No se pudo registrar el historial.',
+        );
+      }
+
+      const saved: TicketHistoryEntry = {
         id: row.id,
         ticketId: row.ticket_id,
         actorId: row.actor_id,
@@ -416,6 +540,10 @@ export const postgresTicketsRepository = {
         correlationId: row.correlation_id,
         createdAt: row.created_at.toISOString(),
       };
+
+      await client.query('COMMIT');
+
+      return saved;
     } catch (cause) {
       await client.query('ROLLBACK');
       throw cause;
@@ -427,13 +555,14 @@ export const postgresTicketsRepository = {
   async historyOf(
     ticketId: number,
   ): Promise<TicketHistoryEntry[]> {
-    const result = await getPool().query<HistoryRow>(
-      `SELECT *
-       FROM ticket_history
-       WHERE ticket_id = $1
-       ORDER BY id`,
-      [ticketId],
-    );
+    const result =
+      await getPool().query<HistoryRow>(
+        `SELECT *
+         FROM ticket_history
+         WHERE ticket_id = $1
+         ORDER BY id`,
+        [ticketId],
+      );
 
     return result.rows.map((row) => ({
       id: row.id,
@@ -466,54 +595,97 @@ export const postgresTicketsRepository = {
     return result.rows[0]?.pending ?? false;
   },
 
-    // ──────────────────────────────────────────────────────────────────────────────
-  // FR-019: Problemas recurrentes vinculados
-  // ──────────────────────────────────────────────────────────────────────────────
-  async linkRecurringProblem(ticketId: number, articleId: number, linkedBy: number): Promise<void> {
+  // FR-019: problemas recurrentes.
+
+  async linkRecurringProblem(
+    ticketId: number,
+    articleId: number,
+    linkedBy: number,
+  ): Promise<void> {
     try {
       await getPool().query(
-        `INSERT INTO ticket_recurring_problems (ticket_id, article_id, linked_by)
+        `INSERT INTO ticket_recurring_problems (
+           ticket_id,
+           article_id,
+           linked_by
+         )
          VALUES ($1, $2, $3)`,
         [ticketId, articleId, linkedBy],
       );
     } catch (error: any) {
-      // Si el código de error es 23505, significa que ya existe la relación (UNIQUE)
       if (error.code === '23505') {
-        throw Errors.conflict('Este problema ya está vinculado a este ticket.');
+        throw Errors.conflict(
+          'Este problema ya está vinculado a este ticket.',
+        );
       }
-      // Si el código es 23503, la FK falló (el ticket o el artículo no existen)
+
       if (error.code === '23503') {
         throw Errors.validation([
-          { field: 'articleId', message: 'El artículo o el ticket no existe.' },
+          {
+            field: 'articleId',
+            message:
+              'El artículo o el ticket no existe.',
+          },
         ]);
       }
+
       throw error;
     }
   },
 
-  async unlinkRecurringProblem(ticketId: number, articleId: number): Promise<void> {
+  async unlinkRecurringProblem(
+    ticketId: number,
+    articleId: number,
+  ): Promise<void> {
     const result = await getPool().query(
       `DELETE FROM ticket_recurring_problems
-       WHERE ticket_id = $1 AND article_id = $2`,
+       WHERE ticket_id = $1
+         AND article_id = $2`,
       [ticketId, articleId],
     );
+
     if (result.rowCount === 0) {
-      throw Errors.notFound('Vínculo de problema recurrente');
+      throw Errors.notFound(
+        'Vínculo de problema recurrente',
+      );
     }
   },
 
-  async getRecurringProblems(ticketId: number): Promise<number[]> {
-    const result = await getPool().query<{ article_id: number }>(
-      `SELECT article_id FROM ticket_recurring_problems
-       WHERE ticket_id = $1 ORDER BY linked_at ASC`,
+  async getRecurringProblems(
+    ticketId: number,
+  ): Promise<number[]> {
+    const result = await getPool().query<{
+      article_id: number;
+    }>(
+      `SELECT article_id
+       FROM ticket_recurring_problems
+       WHERE ticket_id = $1
+       ORDER BY linked_at ASC`,
       [ticketId],
     );
-    return result.rows.map((r) => r.article_id);
+
+    return result.rows.map(
+      (row) => row.article_id,
+    );
   },
 
-    /** FR-009: registra una actividad de investigación y su evento de historial + auditoría en una transacción. */
+  /**
+   * FR-009 + AIR-006 + NFR-009 + FR-020
+   *
+   * La investigación, historial, auditoría,
+   * notificación y aprobación se registran
+   * en una sola transacción PostgreSQL.
+   */
   async addInvestigation(
-    input: Omit<TicketInvestigation, 'id' | 'createdAt' | 'authorName' | 'knowledgeArticleTitle'>,
+    input: Omit<
+      TicketInvestigation,
+      | 'id'
+      | 'createdAt'
+      | 'authorName'
+      | 'knowledgeArticleTitle'
+    > & {
+      aiValidation?: AiApplicationApproval;
+    },
   ): Promise<TicketInvestigation> {
     const client = await getPool().connect();
 
@@ -521,7 +693,13 @@ export const postgresTicketsRepository = {
       await client.query('BEGIN');
 
       const insertResult = await client.query(
-        `INSERT INTO ticket_investigations (ticket_id, author_id, activity, result, knowledge_article_id)
+        `INSERT INTO ticket_investigations (
+           ticket_id,
+           author_id,
+           activity,
+           result,
+           knowledge_article_id
+         )
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
         [
@@ -534,28 +712,65 @@ export const postgresTicketsRepository = {
       );
 
       const inserted = insertResult.rows[0];
-      if (!inserted) throw new Error('No se pudo registrar la investigación.');
 
-      // Evento en ticket_history (texto libre no se copia a audit_log: valuesInAudit=false).
+      if (!inserted) {
+        throw new Error(
+          'No se pudo registrar la investigación.',
+        );
+      }
+
       await client.query(
-        `INSERT INTO ticket_history (ticket_id, actor_id, action, correlation_id)
-         VALUES ($1, $2, 'investigation_logged', $3)`,
-        [input.ticketId, input.authorId, currentCorrelationId()],
+        `INSERT INTO ticket_history (
+           ticket_id,
+           actor_id,
+           action,
+           correlation_id
+         )
+         VALUES (
+           $1, $2, 'investigation_logged', $3
+         )`,
+        [
+          input.ticketId,
+          input.authorId,
+          currentCorrelationId(),
+        ],
       );
 
-      // NFR-009: el evento de auditoría se confirma (o revierte) junto con el cambio.
-      const audit = ticketAuditFor(input.ticketId, {
-        actorId: input.authorId,
-        action: 'investigation_logged',
-      });
-      if (audit) await recordAuditInTransaction(client, audit);
+      const audit = ticketAuditFor(
+        input.ticketId,
+        {
+          actorId: input.authorId,
+          action: 'investigation_logged',
+        },
+      );
 
-      // FR-020: notificar al solicitante (no al actor).
+      if (audit) {
+        await recordAuditInTransaction(
+          client,
+          audit,
+        );
+      }
+
+      const ticketResult = await client.query<{
+        created_by: number;
+      }>(
+        `SELECT created_by
+         FROM tickets
+         WHERE id = $1`,
+        [input.ticketId],
+      );
+
       await notifyInTransaction(client, {
-        actor: { id: input.authorId, email: '', name: '', roles: [] },
+        actor: {
+          id: input.authorId,
+          email: '',
+          name: '',
+          roles: [],
+        },
         next: {
           id: input.ticketId,
-          createdBy: (await client.query('SELECT created_by FROM tickets WHERE id = $1', [input.ticketId])).rows[0]?.created_by ?? 0,
+          createdBy:
+            ticketResult.rows[0]?.created_by ?? 0,
           assignedTechnicianId: null,
           status: 'In Progress',
         },
@@ -563,19 +778,44 @@ export const postgresTicketsRepository = {
         historyAction: 'investigation_logged',
       });
 
+      if (input.aiValidation) {
+        await applyAiValidationInTransaction(
+          client,
+          input.aiValidation,
+        );
+      }
+
+      // Recuperar la investigación ANTES del COMMIT,
+      // utilizando el mismo cliente PostgreSQL.
+      const result =
+        await client.query<InvestigationRow>(
+          `SELECT
+             i.*,
+             u.name AS author_name,
+             ka.title AS knowledge_article_title
+           FROM ticket_investigations i
+           JOIN users u
+             ON u.id = i.author_id
+           LEFT JOIN support_knowledge_articles ka
+             ON ka.id = i.knowledge_article_id
+           WHERE i.id = $1`,
+          [inserted.id],
+        );
+
+      const investigation = result.rows[0];
+
+      if (!investigation) {
+        throw new Error(
+          'No se pudo recuperar la investigación registrada.',
+        );
+      }
+
+      const response =
+        toInvestigation(investigation);
+
       await client.query('COMMIT');
 
-      // Recarga con joins para resolver autor y título del artículo.
-      const result = await getPool().query<InvestigationRow>(
-        `SELECT i.*, u.name AS author_name, ka.title AS knowledge_article_title
-         FROM ticket_investigations i
-         JOIN users u ON u.id = i.author_id
-         LEFT JOIN knowledge_articles ka ON ka.id = i.knowledge_article_id
-         WHERE i.id = $1`,
-        [inserted.id],
-      );
-
-      return toInvestigation(result.rows[0]!);
+      return response;
     } catch (cause) {
       await client.query('ROLLBACK');
       throw cause;
@@ -584,17 +824,28 @@ export const postgresTicketsRepository = {
     }
   },
 
-  /** FR-009: lista las investigaciones de un ticket en orden cronológico, con autor y artículo. */
-  async listInvestigations(ticketId: number): Promise<TicketInvestigation[]> {
-    const result = await getPool().query<InvestigationRow>(
-      `SELECT i.*, u.name AS author_name, ka.title AS knowledge_article_title
-       FROM ticket_investigations i
-       JOIN users u ON u.id = i.author_id
-       LEFT JOIN knowledge_articles ka ON ka.id = i.knowledge_article_id
-       WHERE i.ticket_id = $1
-       ORDER BY i.id`,
-      [ticketId],
-    );
+  /**
+   * FR-009: investigaciones de un ticket,
+   * ordenadas cronológicamente.
+   */
+  async listInvestigations(
+    ticketId: number,
+  ): Promise<TicketInvestigation[]> {
+    const result =
+      await getPool().query<InvestigationRow>(
+        `SELECT
+           i.*,
+           u.name AS author_name,
+           ka.title AS knowledge_article_title
+         FROM ticket_investigations i
+         JOIN users u
+           ON u.id = i.author_id
+         LEFT JOIN support_knowledge_articles ka
+           ON ka.id = i.knowledge_article_id
+         WHERE i.ticket_id = $1
+         ORDER BY i.id`,
+        [ticketId],
+      );
 
     return result.rows.map(toInvestigation);
   },

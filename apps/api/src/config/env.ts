@@ -58,19 +58,21 @@ export const env = {
   dbConnectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 30000),
 
   openAiApiKey: process.env.OPENAI_API_KEY,
-  /** FR-013: modelo y límites operativos del asistente. Valores iniciales por aprobar (presupuesto, tiempos). */
-  aiModel: process.env.AI_MODEL,
-  aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 20000),
-  aiMaxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 800),
-  aiMaxQuestionChars: Number(process.env.AI_MAX_QUESTION_CHARS ?? 1000),
-  /** Consultas al asistente por usuario y ventana (control de costo del proveedor). */
+  /** Adaptadores externos: 'mock' / 'memory' no llaman a ningún servicio real. */
+  aiProvider: process.env.AI_PROVIDER ?? 'mock',
+  /** Consultas al asistente por USUARIO y ventana (control de costo del proveedor). Valores por aprobar. */
   aiRateLimit: {
     windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS ?? 60 * 1000),
     max: Number(process.env.AI_RATE_LIMIT_MAX ?? (nodeEnv === 'test' ? 100000 : 10)),
   },
-  /** Adaptadores externos: 'mock' / 'memory' no llaman a ningún servicio real. */
-  aiProvider: process.env.AI_PROVIDER ?? 'mock',
+  /**
+   * AIR-001: modelo de chat usado por el proveedor OpenAI.
+   * El resto del código NO lo lee: solo lo usa providers/openai-provider.ts
+   * a través de `env.aiOpenAiModel`. Default 'gpt-4o-mini' (suficiente para
+   * RAG interno de soporte). Cambiar solo con acuerdo del equipo.
+   */
+  aiOpenAiModel: process.env.AI_OPENAI_MODEL ?? 'gpt-4o-mini',
   storageProvider: process.env.STORAGE_PROVIDER ?? 'memory',
   /** Usuarios de demostración (solo desarrollo/pruebas). */
   seedDemoData: !isProduction,
-};
+};

@@ -12,6 +12,23 @@ export { ticketsRouter } from './tickets.routes';
 
 export { getTicketForUser } from './tickets.service';
 
+// AIR-004: el módulo AI necesita aplicar recomendaciones aprobadas al ticket
+// reutilizando FR-009 (no duplica lógica). Se exportan los servicios de FR-009
+// para que el módulo AI los llame sin tocar el repositorio.
+export {
+  addInvestigation,
+  resolveTicket,
+  closeTicket,
+  reopenTicket,
+  listInvestigations,
+  createTicket,
+} from './tickets.service';
+
+// AIR-005: el módulo AI necesita revalidar que la categoría confirmada de la
+// sugerencia siga existiendo en el catálogo antes de crear el ticket
+// (criterio: "Los catálogos y permisos se validan nuevamente al guardar").
+export { listCategories } from './tickets.service';
+
 export {
   hasPendingTicketsForTechnician,
   configureArticleReferenceChecker,

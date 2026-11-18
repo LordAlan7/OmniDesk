@@ -7,6 +7,7 @@ import {
   getAuthorization,
   listAuthorizations,
   requestAuthorization,
+  retryIngestion,
   review,
   revoke,
 } from './sources.service';
@@ -95,3 +96,22 @@ aiSourcesRouter.post('/ai/sources/:id/revoke', authenticate, async (req, res, ne
     next(cause);
   }
 });
+
+/** Reintento autorizado de una ingesta fallida. */
+aiSourcesRouter.post(
+  '/ai/sources/:id/retry-ingestion',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await retryIngestion(
+          parseId(req.params.id),
+          currentUser(req),
+        ),
+      );
+    } catch (cause) {
+      next(cause);
+    }
+  },
+);

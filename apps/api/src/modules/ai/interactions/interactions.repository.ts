@@ -1,37 +1,55 @@
-import { env } from '../../../config/env';
-import { recordAuditInMemory } from '../../audit';
-import type { SourceReference } from '../sources/sources.types';
-import { postgresInteractionsRepository } from './interactions.postgres.repository';
-import type { AiInteraction, InteractionsRepository, NewInteraction } from './interactions.types';
+﻿import { env } from '../../../config/env';
+import type { AiInteraction } from './interactions';
 
-const interactions = new Map<number, AiInteraction>();
-let nextId = 1;
+import {
+  recordInteraction,
+  getInteractionById,
+  resetInteractions,
+} from './interactions';
 
-const memoryInteractionsRepository: InteractionsRepository = {
-  async create(data: NewInteraction, audit) {
-    const interaction: AiInteraction = {
-      ...data,
-      references: data.references.map((reference: SourceReference) => ({ ...reference })),
-      id: nextId++,
-      createdAt: new Date().toISOString(),
-    };
-    interactions.set(interaction.id, interaction);
-    recordAuditInMemory({ ...audit, entityId: interaction.id });
-    return interaction;
+import {
+  createInteractionInPostgres,
+  findInteractionInPostgres,
+  listInteractionsInPostgres,
+} from './interactions.postgres.repository';
+
+export interface InteractionRepository {
+  create(
+    input: Omit<AiInteraction, 'id' | 'createdAt'>
+  ): Promise<AiInteraction>;
+
+  findById(id: number): Promise<AiInteraction | undefined>;
+
+  listByUser(userId: number): Promise<AiInteraction[]>;
+}
+
+const memoryRepository: InteractionRepository = {
+  async create(input) {
+    return recordInteraction(input);
   },
 
   async findById(id) {
-    return interactions.get(id);
+    return getInteractionById(id);
+  },
+
+  async listByUser(_userId) {
+    throw new Error(
+      'El listado de interacciones en memoria aún no está implementado.'
+    );
   },
 };
 
-export function resetInteractionsRepository(): void {
-  interactions.clear();
-  nextId = 1;
+const postgresRepository: InteractionRepository = {
+  create: createInteractionInPostgres,
+  findById: findInteractionInPostgres,
+  listByUser: listInteractionsInPostgres,
+};
+
+export const interactionsRepository: InteractionRepository =
+  env.nodeEnv === 'test'
+    ? memoryRepository
+    : postgresRepository;
+
+export function resetMemoryInteractionsRepository(): void {
+  resetInteractions();
 }
-
-const useMemory = env.nodeEnv === 'test';
-
-export const interactionsRepository: InteractionsRepository = useMemory
-  ? memoryInteractionsRepository
-  : postgresInteractionsRepository;

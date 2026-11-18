@@ -21,8 +21,20 @@ export interface DocumentTextExtractor {
 }
 
 let extractor: DocumentTextExtractor = {
-  async extract() {
-    throw new Error('La extracción de texto de PDF no está configurada.');
+  async extract(buffer: Buffer): Promise<string> {
+    // Carga diferida: `pdf-parse` necesita un binario nativo (@napi-rs/canvas) que no existe en todas las
+    // plataformas (p. ej. Windows ARM64). Importarlo al inicio tumbaba toda la API; así solo falla la ingesta del PDF.
+    const { PDFParse } = await import('pdf-parse');
+    const parser = new PDFParse({
+      data: new Uint8Array(buffer),
+    });
+
+    try {
+      const result = await parser.getText();
+      return result.text.trim();
+    } finally {
+      await parser.destroy();
+    }
   },
 };
 
@@ -264,4 +276,47 @@ export async function referenceStatus(
   const authorization = await repository.findById(authorizationId);
   if (!authorization) return 'unknown';
   return authorization.status === 'approved' ? 'current' : 'withdrawn';
+}
+
+/** Reintenta la ingesta fallida sin cambiar la autorizacion aprobada. */
+export async function retryIngestion(
+  id: number,
+  user: AuthUser,
+): Promise<AiSourceAuthorization> {
+  requirePermission(user, PERMISSIONS.AI_SOURCES_REVIEW);
+
+  const authorization = await mustFind(id);
+
+  if (authorization.status !== 'approved') {
+    throw Errors.invalidState(
+      'Solo se puede reprocesar una fuente aprobada.',
+    );
+  }
+
+  if (authorization.ingestionStatus !== 'failed') {
+    throw Errors.invalidState(
+      'Solo se puede reintentar una ingesta fallida.',
+    );
+  }
+
+  const snapshot = await getSourceReader().read(
+    authorization.sourceType,
+    authorization.sourceId,
+    null,
+  );
+
+  const stale = checkAgainstSource(authorization, snapshot);
+
+  if (stale || !snapshot) {
+    await invalidate(
+      authorization,
+      stale ?? 'source_unavailable',
+    );
+
+    throw Errors.conflict(
+      'La fuente cambio o dejo de ser elegible. Se requiere una nueva autorizacion.',
+    );
+  }
+
+  return ingest(authorization, snapshot);
 }

@@ -1,14 +1,14 @@
 -- Tabla para la biblioteca centralizada de conocimientos (FR-011)
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS knowledge_articles (
+CREATE TABLE IF NOT EXISTS support_knowledge_articles (
   id                   SERIAL PRIMARY KEY,
   title                TEXT NOT NULL,
   problem_description  TEXT NOT NULL,
   solution             TEXT NOT NULL,
   category_id          INT NOT NULL REFERENCES ticket_categories(id),
   author_id            INT NOT NULL REFERENCES users(id),
-  status               TEXT NOT NULL DEFAULT 'draft' 
+  status               TEXT NOT NULL DEFAULT 'draft'
                        CHECK (status IN ('draft', 'approved', 'retired')),
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -16,12 +16,12 @@ CREATE TABLE IF NOT EXISTS knowledge_articles (
 );
 
 -- Índices para búsquedas
-CREATE INDEX idx_knowledge_category ON knowledge_articles(category_id);
-CREATE INDEX idx_knowledge_status ON knowledge_articles(status);
-CREATE INDEX idx_knowledge_author ON knowledge_articles(author_id);
+CREATE INDEX IF NOT EXISTS idx_support_knowledge_category ON support_knowledge_articles(category_id);
+CREATE INDEX IF NOT EXISTS idx_support_knowledge_status ON support_knowledge_articles(status);
+CREATE INDEX IF NOT EXISTS idx_support_knowledge_author ON support_knowledge_articles(author_id);
 
 -- Índice para búsqueda por texto (ILIKE optimizado)
-CREATE INDEX idx_knowledge_search ON knowledge_articles 
+CREATE INDEX IF NOT EXISTS idx_support_knowledge_search ON support_knowledge_articles
   USING gin (to_tsvector('spanish', title || ' ' || problem_description || ' ' || solution));
 
 COMMIT;

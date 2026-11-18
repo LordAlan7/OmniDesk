@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
 import { ok, parseId } from '../../shared/http';
+import { Errors } from '../../shared/errors';
 import { currentUser } from '../../shared/security/guards';
 import { documentMetadata, documentPatch, documentQuery, publicationSchema } from './documents.schemas';
 import * as service from './documents.service';
@@ -21,7 +22,29 @@ export const publish: RequestHandler = async (req,res) => {
   ok(res,await service.publish(parseId(req.params.id),publicationSchema.parse(req.body),currentUser(req)));
 };
 export const content: RequestHandler = async (req,res) => {
-  const file = await service.content(parseId(req.params.id),currentUser(req));
+  const rawVersion = req.query.expectedVersion;
+
+  if (
+    rawVersion !== undefined &&
+    (
+      typeof rawVersion !== 'string' ||
+      rawVersion.trim().length === 0 ||
+      rawVersion.length > 128
+    )
+  ) {
+    throw Errors.validation([
+      { field: 'expectedVersion', message: 'Versión esperada inválida.' },
+    ]);
+  }
+
+  const expectedVersion =
+    typeof rawVersion === 'string' ? rawVersion : undefined;
+
+  const file = await service.content(
+    parseId(req.params.id),
+    currentUser(req),
+    expectedVersion
+  );
   res.setHeader('Cache-Control','private, no-store');
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Content-Security-Policy',"sandbox; default-src 'none'");
