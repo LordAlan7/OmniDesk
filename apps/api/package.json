@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "seed-users": "tsx src/scripts/seed-users.ts"
+    "seed-users": "tsx src/scripts/seed-users.ts",
+    "migrate:quotations": "tsx src/scripts/migrate-quotations.ts"
   },
   "dependencies": {
     "@neon/config": "^1.9.3",

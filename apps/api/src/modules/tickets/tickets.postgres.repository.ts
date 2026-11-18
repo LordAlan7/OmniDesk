@@ -1,3 +1,4 @@
+import { applyAiCreationValidationInTransaction, type AiCreationApproval } from '../../shared/db/ai-validation';
 
 import {
   applyAiValidationInTransaction,
@@ -164,7 +165,7 @@ export const postgresTicketsRepository = {
       | 'storeLocation'
       | 'motorcycleModel'
     >,
-  ): Promise<Ticket> {
+  aiValidation?: AiCreationApproval): Promise<Ticket> {
     const client = await getPool().connect();
 
     try {
@@ -222,6 +223,13 @@ export const postgresTicketsRepository = {
         actorId: data.createdBy,
         metadata: { to: 'Open' },
       });
+
+      if (aiValidation) {
+        await applyAiCreationValidationInTransaction(client, {
+          ...aiValidation,
+          destinationId: row.id,
+        });
+      }
 
       const saved = toTicket(row);
 

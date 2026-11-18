@@ -124,6 +124,32 @@ export const AUDIT_EVENTS = {
     outcome: 'rejected',
     valuesInAudit: false,
   }),
+
+  // AIR-005: sugerencia de campos para un ticket a partir de la descripción
+  // libre. El texto sugerido NO se persiste en auditoría; solo se registra
+  // usuario, número de campos faltantes y categoría inferida (si la hubo).
+  // El contenido vive en el almacén de sugerencias y en el ticket que se cree.
+  'ai.ticket_suggestion_generated': event('ai_ticket_suggestion', 'ai', 'La IA propuso campos para un ticket (AIR-005).', {
+    valuesInAudit: false,
+  }),
+  // AIR-005: el usuario confirmó (posiblemente editada) la sugerencia. Esto es
+  // la prueba de revisión humana antes de crear/actualizar el ticket. No se
+  // persiste el texto, solo los ids y metadatos mínimos.
+  'ai.ticket_suggestion_confirmed': event('ai_ticket_suggestion', 'ai', 'El usuario confirmó la sugerencia de ticket (AIR-005).', {
+    valuesInAudit: false,
+  }),
+  // AIR-005: la sugerencia confirmada se materializó en un ticket (nuevo o
+  // actualizado). `metadata.mode` indica 'create' | 'update'; el cambio real
+  // del ticket genera además su propio evento 'ticket.created'/'ticket.updated'.
+  'ai.ticket_suggestion_applied': event('ai_ticket_suggestion', 'ai', 'La sugerencia confirmada se aplicó a un ticket (AIR-005).', {
+    valuesInAudit: false,
+  }),
+  'quotation.reviewed': event(
+    'quotation',
+    'ai',
+    'Una persona revisó una versión de cotización.',
+    { valuesInAudit: false },
+  ),
 } as const satisfies Record<string, AuditEventDefinition>;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

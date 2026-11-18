@@ -1,3 +1,4 @@
+import type { AiCreationApproval } from '../../shared/db/ai-validation';
 
 import { Errors } from '../../shared/errors';
 import { assertStatusInvariants } from './tickets.lifecycle';
@@ -84,7 +85,10 @@ const ticketsMemoryRepository = {
       | 'storeLocation'
       | 'motorcycleModel'
     >,
-  ): Promise<Ticket> {
+  aiValidation?: AiCreationApproval): Promise<Ticket> {
+    if (aiValidation) {
+      throw Errors.invalidState('La aplicación de IA requiere una transacción PostgreSQL.');
+    }
     if (![1, 2, 3, 4].includes(data.categoryId)) {
       throw Errors.validation([
         {

@@ -1,3 +1,4 @@
+import { findSuggestionInteractionPersisted } from '../interactions/interactions.service';
 
 import { Errors } from '../../../shared/errors';
 import type { AuthUser } from '../../../shared/types';
@@ -173,4 +174,42 @@ export async function assertAiValidated(
     validationId: validation.id,
     contentVersion,
   };
+}
+
+/** AIR-005 only: validate approval of newly created ticket fields.
+ * This does NOT loosen the source-verification requirements for FR-015.
+ */
+export async function assertAiTicketCreationValidated(input: {
+  interactionId: number;
+  suggestionId: number;
+  proposalId: string;
+  payload: unknown;
+  user: AuthUser;
+}): Promise<ApplyGuardResult> {
+  const body = input.payload && typeof input.payload === 'object' && !Array.isArray(input.payload)
+    ? input.payload as Record<string, unknown> : null;
+  if (!body || body.approved === true || body.validated === true || body.aiApproved === true) {
+    throw Errors.forbidden('La aprobación no puede enviarse desde el cliente.');
+  }
+  const interaction = await findSuggestionInteractionPersisted(input.interactionId);
+  if (!interaction || interaction.userId !== input.user.id ||
+      interaction.ticketId != null ||
+      interaction.generationConfig?.feature !== 'AIR-005' ||
+      interaction.generationConfig?.suggestionId !== input.suggestionId ||
+      input.proposalId !== String(input.suggestionId)) {
+    throw Errors.notFound('Interaction');
+  }
+  // Field suggestions are not document-backed recommendations.
+  // Only AIR-005's persisted interaction may bypass the FR-015 source guard.
+  const contentVersion = validationsService.hashContent(input.payload);
+  const validation = await validationsService.getActiveValidation(
+    input.interactionId, contentVersion, 'ticket',
+  );
+  if (!validation || validation.proposal_id !== input.proposalId ||
+      validation.destination_id !== null || validation.decision !== 'approved' ||
+      validation.applied_at !== null ||
+      (validation.reviewer_id !== input.user.id && !input.user.roles.includes('Manager'))) {
+    throw Errors.forbidden('La sugerencia no tiene una aprobación humana vigente para crear este ticket.');
+  }
+  return { validationId: validation.id, contentVersion };
 }

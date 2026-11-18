@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../services/api'
+import QuotationPanel from '../components/QuotationPanel.vue'
 import {
   clearSession,
   hasPermission,
@@ -1168,6 +1169,10 @@ watch(
              El ticketId se pasa automáticamente (decisión 4). El permiso ai:query
              lo decide el backend; aquí solo ocultamos la UI a quien no lo tenga. -->
         <AssistantPanel
+          v-if="ticket && hasPermission('ai:query')"
+          :ticket-id="ticket.id"
+        />
+        <QuotationPanel
           v-if="ticket && hasPermission('ai:query')"
           :ticket-id="ticket.id"
         />

@@ -1,3 +1,4 @@
+import type { AiCreationApproval } from '../../shared/db/ai-validation';
 
 import { publicUpdates, canReadInternalHistory } from './tickets.tracking';
 import { canReclassify, resolveApprovedArticleReference } from './tickets.lifecycle';
@@ -143,6 +144,7 @@ export async function createTicket(
   },
   user: AuthUser,
   idempotencyKey?: string,
+  aiValidation?: AiCreationApproval,
 ): Promise<Ticket> {
   if (!can(user, PERMISSIONS.TICKETS_CREATE)) {
     throw Errors.forbidden();
@@ -172,7 +174,7 @@ export async function createTicket(
     createdBy: user.id,
   };
 
-  const result = ticketsRepository.create(input);
+  const result = ticketsRepository.create(input, aiValidation);
 
   if (key) creations.set(key, { fingerprint, result });
 
