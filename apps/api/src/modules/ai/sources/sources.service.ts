@@ -20,17 +20,30 @@ export interface DocumentTextExtractor {
   extract(buffer: Buffer): Promise<string>;
 }
 
+/**
+ * `pdf-parse` (pdf.js) referencia clases de canvas (DOMMatrix, ImageData, Path2D) al cargarse, aunque la
+ * extracción de TEXTO no las usa. Donde falta el binario nativo (@napi-rs/canvas, p. ej. Windows ARM64)
+ * se declaran vacías para poder leer texto; el renderizado de páginas no está soportado en ese caso.
+ */
+function ensureCanvasGlobals(): void {
+  const scope = globalThis as Record<string, unknown>;
+  scope.DOMMatrix ??= class DOMMatrix {};
+  scope.ImageData ??= class ImageData {};
+  scope.Path2D ??= class Path2D {};
+}
+
 let extractor: DocumentTextExtractor = {
   async extract(buffer: Buffer): Promise<string> {
-    // Carga diferida: `pdf-parse` necesita un binario nativo (@napi-rs/canvas) que no existe en todas las
-    // plataformas (p. ej. Windows ARM64). Importarlo al inicio tumbaba toda la API; así solo falla la ingesta del PDF.
+    // Carga diferida: así un fallo de la librería solo afecta la ingesta del PDF y no tumba toda la API.
+    ensureCanvasGlobals();
     const { PDFParse } = await import('pdf-parse');
     const parser = new PDFParse({
       data: new Uint8Array(buffer),
     });
 
     try {
-      const result = await parser.getText();
+      // Sin separadores de página ("-- 1 of 38 --"): un PDF escaneado (solo imágenes) no debe parecer tener texto.
+      const result = await parser.getText({ pageJoiner: '' });
       return result.text.trim();
     } finally {
       await parser.destroy();

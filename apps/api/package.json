@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "seed-users": "tsx src/scripts/seed-users.ts",
+    "create-admin": "tsx src/scripts/create-admin.ts",
     "migrate:quotations": "tsx src/scripts/migrate-quotations.ts"
   },
   "dependencies": {
