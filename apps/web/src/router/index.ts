@@ -115,6 +115,12 @@ const router = createRouter({
 
 
     {
+      path: '/ai/assistant',
+      name: 'ai-assistant',
+      component: () => import('@/views/AiAssistantView.vue'),
+      meta: { permissions: ['ai:query'] },
+    },
+    {
       path: '/ai/sources',
       name: 'ai-sources',
       component: () => import('@/views/AiSourcesView.vue'),

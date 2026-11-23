@@ -104,12 +104,55 @@ const QUOTATION_SYSTEM_PROMPT = [
 ].join('\n');
 
 const OPENAI_TIMEOUT_MS = 30_000;
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+
+/**
+ * Convierte el texto del modelo en JSON. Algunos modelos (p. ej. Gemini) envuelven el JSON en un bloque
+ * ```json ... ``` aunque se les pida solo JSON. Se quita ese envoltorio y, si aún sobra texto, se toma
+ * lo que hay entre la primera "{" y la última "}". Si no es JSON válido, lanza (SyntaxError) como antes.
+ */
+export function parseModelJson(text: string): unknown {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const unfenced = trimmed.replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '').trim();
+    try {
+      return JSON.parse(unfenced);
+    } catch {
+      const start = unfenced.indexOf('{');
+      const end = unfenced.lastIndexOf('}');
+      if (start === -1 || end <= start) throw new SyntaxError('La respuesta del modelo no contiene JSON.');
+      return JSON.parse(unfenced.slice(start, end + 1));
+    }
+  }
+}
+
+/**
+ * Une los mensajes de sistema consecutivos en uno solo. Algunos servicios compatibles con OpenAI (p. ej. Gemini)
+ * solo conservan UN mensaje de sistema y descartan el resto: el modelo no veía las fuentes autorizadas y
+ * respondía "información insuficiente". Un único mensaje funciona igual en OpenAI.
+ */
+export function mergeSystemMessages(body: unknown): unknown {
+  const payload = body as { messages?: { role: string; content: string }[] };
+  if (!payload || !Array.isArray(payload.messages)) return body;
+
+  const merged: { role: string; content: string }[] = [];
+  for (const message of payload.messages) {
+    const last = merged[merged.length - 1];
+    if (message.role === 'system' && last?.role === 'system') {
+      last.content = `${last.content}\n\n${message.content}`;
+    } else {
+      merged.push({ ...message });
+    }
+  }
+  return { ...payload, messages: merged };
+}
 
 export class OpenAIProvider implements AIProvider {
   constructor(
     private readonly apiKey: string = env.openAiApiKey ?? '',
     private readonly model: string = env.aiOpenAiModel,
+    private readonly baseUrl: string = env.aiOpenAiBaseUrl,
   ) {
     if (!this.apiKey) {
       // Falla rápido: si alguien selecciona 'openai' sin clave, no arranca el módulo.
@@ -170,7 +213,7 @@ export class OpenAIProvider implements AIProvider {
     let structured: unknown;
 
     try {
-      structured = JSON.parse(text);
+      structured = parseModelJson(text);
     } catch {
       throw Errors.badGateway(
         'El proveedor de IA devolvio un formato no valido.'
@@ -251,7 +294,7 @@ export class OpenAIProvider implements AIProvider {
 
     let structured: unknown;
     try {
-      structured = JSON.parse(text);
+      structured = parseModelJson(text);
     } catch {
       throw Errors.badGateway(
         'El proveedor de IA devolvio un formato no valido para la sugerencia.',
@@ -331,7 +374,7 @@ export class OpenAIProvider implements AIProvider {
     let structured: unknown;
 
     try {
-      structured = JSON.parse(text);
+      structured = parseModelJson(text);
     } catch {
       throw Errors.badGateway(
         'El proveedor de IA devolvió un formato no válido para la cotización.',
@@ -364,13 +407,13 @@ export class OpenAIProvider implements AIProvider {
 
     let response: Response;
     try {
-      response = await fetch(OPENAI_URL, {
+      response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(mergeSystemMessages(body)),
         signal: controller.signal,
       });
     } catch (cause) {
@@ -380,6 +423,8 @@ export class OpenAIProvider implements AIProvider {
     }
 
     if (!response.ok) {
+      // Solo el código HTTP: nunca el cuerpo, la clave ni el contexto enviado.
+      console.error('[ai] el proveedor respondió con estado', response.status);
       throw Errors.badGateway(
         response.status === 429
           ? 'El proveedor de IA está saturado. Intenta en unos segundos.'

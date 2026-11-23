@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ok, parseId } from '../../shared/http';
 import { PERMISSIONS, requirePermission, } from '../../shared/authorization';
 import { authenticate, currentUser, } from '../../shared/security/guards';
+import { aiRateLimiter } from '../../shared/middleware/rateLimit';
 import { recordAudit } from '../audit';
 import { Errors } from '../../shared/errors';
 import { askWithAuthorizedSources } from './ai.service';
@@ -53,7 +54,7 @@ function validationIssues(issues: z.ZodIssue[]): {
 }
 // FR-013 + FR-015 + AIR-007
 // Generación de respuestas y registro persistente.
-aiRouter.post('/ai/ask', authenticate, requirePermission(PERMISSIONS.AI_QUERY), async (req, res, next) => {
+aiRouter.post('/ai/ask', authenticate, requirePermission(PERMISSIONS.AI_QUERY), aiRateLimiter, async (req, res, next) => {
     try {
         const parsed = askSchema.safeParse(req.body);
         if (!parsed.success) {

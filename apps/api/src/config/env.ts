@@ -60,6 +60,11 @@ export const env = {
   openAiApiKey: process.env.OPENAI_API_KEY,
   /** Adaptadores externos: 'mock' / 'memory' no llaman a ningún servicio real. */
   aiProvider: process.env.AI_PROVIDER ?? 'mock',
+  /** Consultas al asistente por USUARIO y ventana (control de costo del proveedor). Valores por aprobar. */
+  aiRateLimit: {
+    windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS ?? 60 * 1000),
+    max: Number(process.env.AI_RATE_LIMIT_MAX ?? (nodeEnv === 'test' ? 100000 : 10)),
+  },
   /**
    * AIR-001: modelo de chat usado por el proveedor OpenAI.
    * El resto del código NO lo lee: solo lo usa providers/openai-provider.ts
@@ -67,6 +72,12 @@ export const env = {
    * RAG interno de soporte). Cambiar solo con acuerdo del equipo.
    */
   aiOpenAiModel: process.env.AI_OPENAI_MODEL ?? 'gpt-4o-mini',
+  /**
+   * Dirección base de la API de chat. Por defecto OpenAI; también sirve cualquier servicio compatible con
+   * su formato (p. ej. Gemini: https://generativelanguage.googleapis.com/v1beta/openai). La clave sigue
+   * siendo OPENAI_API_KEY y el modelo AI_OPENAI_MODEL.
+   */
+  aiOpenAiBaseUrl: (process.env.AI_OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/+$/, ''),
   storageProvider: process.env.STORAGE_PROVIDER ?? 'memory',
   /** Usuarios de demostración (solo desarrollo/pruebas). */
   seedDemoData: !isProduction,
