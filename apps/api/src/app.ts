@@ -37,6 +37,7 @@ import {
 import { ticketCategoriesRouter } from './modules/tickets/tickets.categories.routes';
 import { accessibleTicketIdsForUser } from './modules/tickets';
 import { healthCheck } from './shared/middleware/health';
+import { inventoryRouter } from './modules/inventory/inventory.routes';
 
 
 export function createApp() {
@@ -88,6 +89,7 @@ export function createApp() {
   api.use(reportsRouter);
   api.use(notificationsRouter);
   api.use(auditRouter);
+  api.use(inventoryRouter);
 
   app.use('/api/v1', api);
   app.use(notFoundHandler);

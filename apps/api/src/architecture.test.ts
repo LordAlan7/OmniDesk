@@ -19,6 +19,7 @@ const ALLOWED: Record<string, string[]> = {
   knowledge: ['files', 'audit'],
   ai: ['knowledge', 'tickets', 'audit'],
   reports: ['tickets'],
+  inventory: [],
 };
 
 const modules = fs

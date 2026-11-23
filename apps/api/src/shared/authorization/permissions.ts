@@ -48,6 +48,9 @@ export const PERMISSIONS = {
   // Reports
   REPORTS_READ: 'reports:read',
   REPORTS_READ_GLOBAL: 'reports:read:global',
+  
+  // Inventory
+  INVENTORY_READ: 'inventory:read', 
 
   // Audit
   AUDIT_READ: 'audit:read',
