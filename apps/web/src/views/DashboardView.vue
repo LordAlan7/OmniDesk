@@ -53,6 +53,12 @@ const opciones = computed(() =>
       visible: session.can('users:read:list'),
     },
     {
+      titulo: 'Asistente técnico',
+      descripcion: 'Consulta recomendaciones de diagnóstico con apoyo de IA.',
+      ruta: '/ai/assistant',
+      visible: session.can('ai:query'),
+    },
+    {
       titulo: 'Fuentes autorizadas para IA',
       descripcion: 'Aprueba o retira las fuentes que puede usar el asistente.',
       ruta: '/ai/sources',

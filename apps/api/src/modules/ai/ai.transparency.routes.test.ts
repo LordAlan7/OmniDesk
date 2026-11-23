@@ -1,223 +1,336 @@
-﻿import request from 'supertest';
-import { app, bearer, loginAs } from '../../test-helpers';
+﻿
+import request from 'supertest';
+
+import {
+  app,
+  bearer,
+  loginAs,
+} from '../../test-helpers';
+
 import {
   recordInteraction,
   resetInteractions,
 } from './interactions/interactions';
+
 import {
   getActiveReviewForInteraction,
   resetReviews,
 } from './reviews/reviews';
+
 import {
   configureSourceReader,
   resetSourceReader,
 } from './sources/source-reader';
+
 import { sourcesRepository } from './sources/sources.repository';
+
 import type {
   AiSourceAuthorization,
   SourceReference,
 } from './sources/sources.types';
-import type { KnowledgeSourceSnapshot } from '../knowledge';
-import { getPool } from '../../shared/db/pool';
 
-describe('NFR-003 - seguridad HTTP de recomendaciones IA', () => {
-  let technicianToken: string;
+import type {
+  KnowledgeSourceSnapshot,
+} from '../knowledge';
 
-  const userId = 2;
+/**
+ * NFR-003 + AIR-006 + FR-015
+ *
+ * Estas pruebas verifican el comportamiento HTTP
+ * y la autorización de las recomendaciones.
+ *
+ * NODE_ENV=test utiliza interacciones y revisiones
+ * en memoria.
+ *
+ * La persistencia SQL de AIR-006 se simula para
+ * evitar referencias a interacciones que no existen
+ * en la base de datos de PostgreSQL.
+ */
+jest.mock('./reviews/reviews', () => {
+  const actual = jest.requireActual('./reviews/reviews');
 
-  const reference: SourceReference = {
-    authorizationId: 10,
-    sourceType: 'article',
-    sourceId: 7,
-    sourceVersion: '2',
-    title: 'Manual de soporte',
-    chunkIndex: 0,
+  return {
+    ...actual,
+
+    recordReviewPersisted: jest.fn(
+      async () => undefined,
+    ),
   };
+});
 
-  const authorization = {
-    id: 10,
-    status: 'approved',
-    sourceType: 'article',
-    sourceId: 7,
-    sourceVersion: '2',
-    contentHash: 'hash-original',
-  } as AiSourceAuthorization;
+describe(
+  'NFR-003 - seguridad HTTP de recomendaciones IA',
+  () => {
+    let technicianToken: string;
 
-  const snapshot = {
-    type: 'article',
-    id: 7,
-    title: 'Manual de soporte',
-    version: '2',
-    contentHash: 'hash-original',
-    eligible: true,
-    visibleToUser: true,
-  } as KnowledgeSourceSnapshot;
+    const userId = 2;
+    const ticketId = 1;
 
-  function createInteraction(references: SourceReference[]) {
-    return recordInteraction({
-      userId,
-      question: '¿Cómo solucionar el problema?',
-      answer: 'Revisar la conexión del equipo.',
-      references,
-    });
-  }
+    const reference: SourceReference = {
+      authorizationId: 10,
+      sourceType: 'article',
+      sourceId: 7,
+      sourceVersion: '2',
+      title: 'Manual de soporte',
+      chunkIndex: 0,
+    };
 
-  function configureAuthorizedSource() {
-    return jest
-      .spyOn(sourcesRepository, 'findById')
-      .mockResolvedValue(authorization);
-  }
+    const authorization = {
+      id: 10,
+      status: 'approved',
+      sourceType: 'article',
+      sourceId: 7,
+      sourceVersion: '2',
+      contentHash: 'hash-original',
+    } as AiSourceAuthorization;
 
-  beforeAll(async () => {
-    technicianToken = await loginAs('technician@company.com');
-  });
+    const snapshot = {
+      type: 'article',
+      id: 7,
+      title: 'Manual de soporte',
+      version: '2',
+      contentHash: 'hash-original',
+      eligible: true,
+      visibleToUser: true,
+    } as KnowledgeSourceSnapshot;
 
-  beforeEach(async () => {
-    resetInteractions();
-    resetReviews();
-    // Limpiamos la tabla de validaciones antes de cada test para evitar el 409 Conflict
-    try {
-      await getPool().query('DELETE FROM ai_validation');
-    } catch (e) {
-      // Ignorar si la tabla no existe en algún entorno
-    }
-  });
-
-  afterEach(() => {
-    resetSourceReader();
-    jest.restoreAllMocks();
-  });
-
-  
-
-  test('no permite aprobar una respuesta sin referencias', async () => {
-    
-    const interaction = createInteraction([]);
-    
-
-    const response = await request(app)
-      .post(`/api/v1/ai/interactions/${interaction.id}/review`)
-      .set(bearer(technicianToken))
-      .send({
-        decision: 'approved',
-        reason: 'Solicito aprobar esta recomendación.',
-      });
-
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(response.status).toBeLessThan(500);
-
-    expect(
-      getActiveReviewForInteraction(interaction.id),
-    ).toBeUndefined();
-  });
-
-  test('permite aprobar una respuesta con respaldo vigente', async () => {
-        // Mockeamos el servicio de tickets para que devuelva un ticket falso
-    // y así evitar el "Ticket was not found" en el entorno de Jest
-    jest.spyOn(require('../tickets/tickets.service'), 'getTicketForUser').mockResolvedValue({ 
-      id: 1, 
-      status: 'Open' 
-    } as any);
-    configureAuthorizedSource();
-
-    configureSourceReader({
-      read: async () => snapshot,
-    });
-
-    const interaction = createInteraction([reference]);
-    
-
-    const response = await request(app)
-      .post(`/api/v1/ai/interactions/${interaction.id}/review`)
-      .set(bearer(technicianToken))
-      .send({
-        decision: 'approved',
-        reason: 'Referencias comprobadas y revisadas.',
-      });
-
-    expect(response.status).toBeGreaterThanOrEqual(200);
-    expect(response.status).toBeLessThan(300);
-
-    expect(
-      getActiveReviewForInteraction(interaction.id)?.decision,
-    ).toBe('approved');
-  });
-
-  test('no permite aplicar si la fuente fue revocada', async () => {
-    // Mockeamos el servicio de tickets para que no truene por no encontrar el ticket
-    jest.spyOn(require('../tickets/tickets.service'), 'getTicketForUser').mockResolvedValue({
-      id: 1, 
-      status: 'Open' 
-    } as any);
-
-    const authorizationMock = configureAuthorizedSource();
-    // ... el resto del test
-
-    configureSourceReader({
-      read: async () => snapshot,
-    });
-
-    const interaction = createInteraction([reference]);
-    // Aprobamos la revisión primero
-    const review = await request(app)
-      .post(`/api/v1/ai/interactions/${interaction.id}/review`)
-      .set(bearer(technicianToken))
-      .send({
-        decision: 'approved',
-        reason: 'Recomendación revisada con fuentes vigentes.',
-      });
-
-    expect(review.status).toBeGreaterThanOrEqual(200);
-    expect(review.status).toBeLessThan(300);
-        // Insertamos manualmente una validación aprobada en Postgres
-    // para que el Guard de AIR-006 no bloquee la prueba de NFR-003
     const payloadContent = {
       activity: 'Revisar la conexión del equipo.',
       result: 'Se realizó la inspección inicial.',
     };
-    const contentVersion = require('crypto')
-      .createHash('sha256')
-      .update(JSON.stringify(payloadContent))
-      .digest('hex');
 
-    await getPool().query(
-      `INSERT INTO ai_validation (interaction_id, proposal_id, content_version, destination_type, destination_id, decision, reason, reviewer_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT DO NOTHING`,
-      [
-        interaction.id,
-        String(interaction.id),
-        contentVersion,
-        'ticket',
-        1,
-        'approved',
-        'Validación de prueba para NFR-003',
-        2,
-      ]
-    );
+    /**
+     * Crea una interacción simulada asociada
+     * al ticket utilizado por estas pruebas.
+     *
+     * FR-015 exige la asociación al ticket
+     * antes de aprobar una recomendación.
+     */
+    function createInteraction(
+      references: SourceReference[],
+    ) {
+      return recordInteraction({
+        userId,
+        question: '¿Cómo solucionar el problema?',
+        answer: 'Revisar la conexión del equipo.',
+        references,
+        ticketId,
+      });
+    }
 
-    // Simulamos que la fuente fue revocada
-    authorizationMock.mockResolvedValue({
-      ...authorization,
-      status: 'revoked',
+    /**
+     * Configura una autorización aprobada.
+     * Devuelve el mock para permitir revocarlo
+     * durante una prueba.
+     */
+    function configureAuthorizedSource() {
+      return jest
+        .spyOn(sourcesRepository, 'findById')
+        .mockResolvedValue(authorization);
+    }
+
+    /**
+     * La autorización de acceso al ticket
+     * se comprueba con un objeto simulado.
+     *
+     * No se consulta la base de datos real.
+     */
+    function mockTicketAccess() {
+      return jest
+        .spyOn(
+          require('../tickets/tickets.service'),
+          'getTicketForUser',
+        )
+        .mockResolvedValue({
+          id: ticketId,
+          status: 'In Progress',
+          version: 1,
+          createdBy: userId,
+          assignedTechnicianId: userId,
+        } as any);
+    }
+
+    beforeAll(async () => {
+      technicianToken = await loginAs(
+        'technician@company.com',
+      );
     });
 
-    // Hacemos la petición de aplicar
-    const response = await request(app)
-      .post(`/api/v1/ai/interactions/${interaction.id}/apply`)
-      .set(bearer(technicianToken))
-      .send({
-        target: 'investigation',
-        ticketId: 1,
-        content: {
-          activity: 'Revisar la conexión del equipo.',
-          result: 'Se realizó la inspección inicial.',
-        },
-      });
+    beforeEach(() => {
+      resetInteractions();
+      resetReviews();
 
-    // Verificamos que el error sea por el respaldo revocado, no por el ticket
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(response.status).toBeLessThan(500);
-    expect(JSON.stringify(response.body)).toMatch(/respaldo autorizado/i);
-  });
-});
+      mockTicketAccess();
+    });
+
+    afterEach(() => {
+      resetSourceReader();
+
+      jest.restoreAllMocks();
+    });
+
+    /**
+     * CASO 1
+     *
+     * Una recomendación sin fuentes autorizadas
+     * no puede aprobarse.
+     */
+    test(
+      'no permite aprobar una respuesta sin referencias',
+      async () => {
+        const interaction = createInteraction([]);
+
+        const response = await request(app)
+          .post(
+            `/api/v1/ai/interactions/${interaction.id}/review`,
+          )
+          .set(bearer(technicianToken))
+          .send({
+            decision: 'approved',
+            reason:
+              'Solicito aprobar esta recomendación.',
+            target: 'investigation',
+            content: payloadContent,
+          });
+
+        expect(response.status)
+          .toBeGreaterThanOrEqual(400);
+
+        expect(response.status)
+          .toBeLessThan(500);
+
+        expect(
+          getActiveReviewForInteraction(
+            interaction.id,
+          ),
+        ).toBeUndefined();
+      },
+    );
+
+    /**
+     * CASO 2
+     *
+     * Una recomendación con referencias
+     * autorizadas y vigentes puede aprobarse.
+     */
+    test(
+      'permite aprobar una respuesta con respaldo vigente',
+      async () => {
+        configureAuthorizedSource();
+
+        configureSourceReader({
+          read: async () => snapshot,
+        });
+
+        const interaction = createInteraction([
+          reference,
+        ]);
+
+        const response = await request(app)
+          .post(
+            `/api/v1/ai/interactions/${interaction.id}/review`,
+          )
+          .set(bearer(technicianToken))
+          .send({
+            decision: 'approved',
+            reason:
+              'Referencias comprobadas y revisadas.',
+            target: 'investigation',
+            content: payloadContent,
+          });
+
+        expect(response.status)
+          .toBeGreaterThanOrEqual(200);
+
+        expect(response.status)
+          .toBeLessThan(300);
+
+        expect(
+          getActiveReviewForInteraction(
+            interaction.id,
+          )?.decision,
+        ).toBe('approved');
+      },
+    );
+
+    /**
+     * CASO 3
+     *
+     * Una recomendación previamente aprobada
+     * no puede aplicarse después de que su
+     * fuente autorizada sea revocada.
+     */
+    test(
+      'no permite aplicar si la fuente fue revocada',
+      async () => {
+        const authorizationMock =
+          configureAuthorizedSource();
+
+        configureSourceReader({
+          read: async () => snapshot,
+        });
+
+        const interaction = createInteraction([
+          reference,
+        ]);
+
+        // Aprobar mientras la fuente es válida.
+        const review = await request(app)
+          .post(
+            `/api/v1/ai/interactions/${interaction.id}/review`,
+          )
+          .set(bearer(technicianToken))
+          .send({
+            decision: 'approved',
+            reason:
+              'Recomendación revisada con fuentes vigentes.',
+            target: 'investigation',
+            content: payloadContent,
+          });
+
+        expect(review.status)
+          .toBeGreaterThanOrEqual(200);
+
+        expect(review.status)
+          .toBeLessThan(300);
+
+        expect(
+          getActiveReviewForInteraction(
+            interaction.id,
+          )?.decision,
+        ).toBe('approved');
+
+        // Revocar la fuente después de aprobar.
+        authorizationMock.mockResolvedValue({
+          ...authorization,
+          status: 'revoked',
+        } as AiSourceAuthorization);
+
+        // Intentar aplicar la recomendación.
+        const response = await request(app)
+          .post(
+            `/api/v1/ai/interactions/${interaction.id}/apply`,
+          )
+          .set(bearer(technicianToken))
+          .send({
+            target: 'investigation',
+            ticketId,
+            content: payloadContent,
+          });
+
+        // Debe rechazarse.
+        expect(response.status)
+          .toBeGreaterThanOrEqual(400);
+
+        expect(response.status)
+          .toBeLessThan(500);
+
+        // Debe rechazarse por perder el respaldo,
+        // no porque el ticket sea inexistente.
+        expect(
+          JSON.stringify(response.body),
+        ).toMatch(/respaldo autorizado/i);
+      },
+    );
+  },
+);

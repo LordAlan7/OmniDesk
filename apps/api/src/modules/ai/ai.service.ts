@@ -105,6 +105,13 @@ export async function askWithAuthorizedSources(
       retrieval.fragments
     );
   } catch {
+    // Diagnóstico seguro: solo los identificadores que citó el modelo (sin texto de fuentes ni de la respuesta).
+    console.error(
+      '[ai] respuesta descartada: citas inválidas. Citadas:',
+      JSON.stringify(answer.citations ?? null),
+      '| Enviadas:',
+      retrieval.fragments.map((f) => `${f.authorizationId}:${f.chunkIndex}`).join(','),
+    );
     return {
       status: 'insufficient_information',
       message: INSUFFICIENT_INFORMATION,
@@ -114,6 +121,7 @@ export async function askWithAuthorizedSources(
   }
 
   if (references.length === 0) {
+    console.error('[ai] respuesta descartada: el modelo no citó ninguna fuente (citas vacías).');
     return {
       status: 'insufficient_information',
       message: INSUFFICIENT_INFORMATION,

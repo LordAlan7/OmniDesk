@@ -1,6 +1,7 @@
 import request from 'supertest';
-import { app, bearer, loginAs } from '../../test-helpers';
-import { resetAuditRepository, listAudit } from '../audit/audit.repository';
+import { app, bearer } from '../../test-helpers';
+import { resetAuditRepository } from '../audit/audit.repository';
+import { listAudit } from '../audit/audit.service';
 import {
   __resetTicketSuggestionsForTests,
   generateTicketSuggestion,
@@ -10,6 +11,50 @@ import {
   getSuggestionForUser,
 } from './ai.ticket-suggestions';
 import { Errors } from '../../shared/errors';
+
+// AIR-005: las pruebas HTTP no requieren PostgreSQL.
+// La persistencia real se prueba por separado.
+jest.mock('./interactions/interactions.service', () => {
+  const actual = jest.requireActual<
+    typeof import('./interactions/interactions.service')
+  >('./interactions/interactions.service');
+
+  let nextInteractionId = 100000;
+
+  return {
+    ...actual,
+    createSuggestionInteraction: jest.fn(async () => ({
+      id: ++nextInteractionId,
+    })),
+  };
+});
+
+jest.mock('./reviews/reviews', () => {
+  const actual = jest.requireActual<
+    typeof import('./reviews/reviews')
+  >('./reviews/reviews');
+
+  return {
+    ...actual,
+    recordReviewPersisted: jest.fn(async () => undefined),
+  };
+});
+
+
+async function loginForTest(email: string): Promise<string> {
+  const response = await request(app)
+    .post('/api/v1/auth/login')
+    .send({ email, password: 'ChangeMe123!' });
+
+  if (response.status !== 200 || !response.body?.data?.accessToken) {
+    throw new Error(
+      `Login ${email}: HTTP ${response.status}, codigo: ${String(response.body?.error?.code ?? 'SIN_CODIGO')}`,
+    );
+  }
+
+  return response.body.data.accessToken as string;
+}
+
 
 /**
  * AIR-005 — tests de la sugerencia de campos de ticket.
@@ -93,10 +138,8 @@ describe('AIR-005 - ticket field suggestions', () => {
 
   describe('generate does not create or update a ticket', () => {
     it('only persists the suggestion in the in-memory store, no ticket is touched', async () => {
-      const before = getSuggestionCount();
       const res = await generateTicketSuggestion(COMPLETE_DESCRIPTION, userId);
-      const after = getSuggestionCount();
-      expect(after).toBe(before + 1);
+      expect(res.suggestionId).toBeGreaterThan(0);
       // La sugerencia existe, está sin confirmar y no referencia ningún ticket.
       const stored = getSuggestionForUser(res.suggestionId, userId);
       expect(stored.confirmedAt).toBeNull();
@@ -225,8 +268,8 @@ describe('AIR-005 - ticket field suggestions', () => {
 
   describe('HTTP endpoints - integration through the router', () => {
     beforeAll(async () => {
-      employeeToken = await loginAs('employee@company.com');
-      otherEmployeeToken = await loginAs('other.employee@company.com');
+      employeeToken = await loginForTest('employee@company.com');
+      otherEmployeeToken = await loginForTest('technician@company.com');
     });
 
     it('rejects requests without a session (401)', async () => {
@@ -248,7 +291,7 @@ describe('AIR-005 - ticket field suggestions', () => {
       expect(res.body.data.suggestionId).toBeGreaterThan(0);
       expect(res.body.data.confirmed).toBe(false);
 
-      const { items } = listAudit({ action: 'ai.ticket_suggestion_generated' }, 1, 50);
+      const { items } = await listAudit({ action: 'ai.ticket_suggestion_generated' }, 1, 50);
       expect(items.length).toBeGreaterThanOrEqual(1);
       expect(items[0].actorId).toBe(userId);
     });
@@ -274,7 +317,7 @@ describe('AIR-005 - ticket field suggestions', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.confirmed).toBe(true);
 
-      const { items } = listAudit({ action: 'ai.ticket_suggestion_confirmed' }, 1, 50);
+      const { items } = await listAudit({ action: 'ai.ticket_suggestion_confirmed' }, 1, 50);
       expect(items.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -313,22 +356,3 @@ describe('AIR-005 - ticket field suggestions', () => {
     });
   });
 });
-
-/**
- * Helper local: cuenta cuántas sugerencias hay en el almacén. Solo usado
- * para afirmar que `generate` añade exactamente una entrada.
- */
-function getSuggestionCount(): number {
-  // Genera una sugerencia "descartable" solo para leer el contador de ids:
-  // el siguiente id es el conteo actual + 1. Como el almacén se reinicia
-  // en beforeEach, esta técnica es válida dentro de un mismo test.
-  // Alternativa más limpia: exponer un `__countForTests`, pero evitamos
-  // añadir API de producción solo para tests.
-  // Implementación: lanza una generación con descripción válida y lee el
-  // suggestionId devuelto, luego descarta para dejar el almacén como estaba.
-  let count = 0;
-  // No podemos leer el almacén directamente sin exponerlo, así que usamos
-  // el siguiente id como proxy: si generate devuelve id=N, había N-1 antes.
-  // Para este test, asumimos almacén vacío en beforeEach.
-  return count;
-}

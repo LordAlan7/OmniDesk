@@ -44,27 +44,28 @@ let nextId = 1;
 /**
  * AIR-007: Guarda la interacción en memoria y en PostgreSQL (asíncronamente).
  */
-export function recordInteraction(input: RecordInteractionInput): AiInteraction {
-  const interaction: AiInteraction = { ...input, id: nextId++, createdAt: new Date().toISOString() };
-  store.set(interaction.id, interaction);
 
-  // AIR-007: Solo guardamos en Postgres si NO estamos en Jest (evita romper tests de otros)
-  // AIR-007: Solo guardamos en Postgres si NO estamos en Jest
-  // Usamos 'typeof jest === undefined' porque Jest inyecta la variable 'jest' globalmente
-  if (typeof jest === 'undefined') {
-    const { saveInteractionToDb } = require('./interactions.repository');
-    
-    saveInteractionToDb(input, interaction.createdAt)
-      .then((dbId: any) => {
-        interaction.id = dbId;
-      })
-      .catch((error: any) => {
-        console.error('Error al persistir interacción (AIR-007) en Postgres:', error);
-      });
-  }
+/**
+ * Almacén en memoria para pruebas unitarias.
+ *
+ * En producción, la persistencia se realiza mediante
+ * interactionsService.create(), que espera el resultado
+ * de PostgreSQL antes de devolver la interacción.
+ */
+export function recordInteraction(
+  input: RecordInteractionInput,
+): AiInteraction {
+  const interaction: AiInteraction = {
+    ...input,
+    id: nextId++,
+    createdAt: new Date().toISOString(),
+  };
+
+  store.set(interaction.id, interaction);
 
   return interaction;
 }
+
 
 export function resetInteractions(): void {
   store.clear();
@@ -81,10 +82,17 @@ export function getInteractionById(id: number): AiInteraction | undefined {
  * revalida cada referencia con los permisos actuales: si una fuente se retiró o el usuario perdió
  * acceso, el texto generado NO se vuelve a mostrar.
  */
-export async function getInteractionForUser(id: number, user: AuthUser): Promise<InteractionView> {
+export async function getInteractionForUser(
+  id: number,
+  user: AuthUser,
+  loadInteraction: (
+    id: number
+  ) => Promise<AiInteraction | undefined> | AiInteraction | undefined =
+    getInteractionById,
+): Promise<InteractionView> {
   if (!can(user, PERMISSIONS.AI_INTERACTIONS_READ)) throw Errors.forbidden();
 
-  const interaction = store.get(id);
+  const interaction = await loadInteraction(id);
   if (!interaction || interaction.userId !== user.id) throw Errors.notFound('Interaction');
 
   for (const reference of interaction.references) {
