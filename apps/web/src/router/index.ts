@@ -97,6 +97,24 @@ const router = createRouter({
         ticketWorkspace: true,
       },
     },
+    {
+      path: '/inventory/vehicle',
+      name: 'inventory-vehicle',
+      component: () =>
+        import('@/views/InventoryVehicleView.vue'),
+      meta: {
+        permissions: ['inventory:read'],
+      },
+    },
+    {
+      path: '/inventory/parts',
+      name: 'inventory-parts',
+      component: () =>
+        import('@/views/PartsLookupView.vue'),
+      meta: {
+        permissions: ['inventory:read'],
+      },
+    },
 
     // Acceso de administración de usuarios.
 

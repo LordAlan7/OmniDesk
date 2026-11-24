@@ -6,6 +6,7 @@ import { TRANSITIONS, availableTransitions, isOverdue } from './tickets.deadline
 import { Errors } from '../../shared/errors';
 import { AuthUser } from '../../shared/types';
 import { recordAudit } from '../audit';
+import { getInventoryProvider } from '../inventory';
 import { getArticle } from '../knowledge';
 import type { AiApplicationApproval } from '../../shared/db/ai-validation';
 import {
@@ -26,6 +27,7 @@ import {
   TicketHistoryEntry,
   TicketInvestigation,
   TicketStatus,
+  TicketVehicle,
 } from './tickets.types';
 
 // NFR-008: Caché local de idempotencia.
@@ -134,13 +136,46 @@ function publishStatus(
   // No-op.
 }
 
+/** Paso 6: valida el VIN contra inventario y devuelve la copia mínima. */
+async function resolveVehicle(vin: string): Promise<TicketVehicle> {
+  const v = await getInventoryProvider().getVehicleByVin(vin);
+  return {
+    vehicleVin: v.vin,
+    vehicleModelId: v.modelId,
+    vehicleBrand: v.brand,
+    vehicleModel: v.model,
+    vehicleYear: v.year,
+  };
+}
+
+function vehicleSnapshot(t: Ticket) {
+  return t.vehicleVin
+    ? {
+        vin: t.vehicleVin,
+        modelId: t.vehicleModelId ?? null,
+        brand: t.vehicleBrand ?? null,
+        model: t.vehicleModel ?? null,
+        year: t.vehicleYear ?? null,
+      }
+    : null;
+}
+
+function applyVehicle(t: Ticket, v?: TicketVehicle): void {
+  t.vehicleVin = v?.vehicleVin ?? null;
+  t.vehicleModelId = v?.vehicleModelId ?? null;
+  t.vehicleBrand = v?.vehicleBrand ?? null;
+  t.vehicleModel = v?.vehicleModel ?? null;
+  t.vehicleYear = v?.vehicleYear ?? null;
+}
+
 export async function createTicket(
   data: {
     title: string;
     description: string;
     categoryId: number;
     storeLocation: string;
-    motorcycleModel: string;
+    motorcycleModel?: string;
+    vehicleVin?: string;
   },
   user: AuthUser,
   idempotencyKey?: string,
@@ -149,6 +184,11 @@ export async function createTicket(
   if (!can(user, PERMISSIONS.TICKETS_CREATE)) {
     throw Errors.forbidden();
   }
+
+  // Se valida antes de consultar la caché de idempotencia para no abrir una carrera.
+  const vehicle = data.vehicleVin
+    ? await resolveVehicle(data.vehicleVin)
+    : undefined;
 
   const key = idempotencyKey
     ? `${user.id}:${idempotencyKey}`
@@ -168,9 +208,14 @@ export async function createTicket(
   }
 
   const input = {
-    ...data,
+    title: data.title,
+    description: data.description,
+    categoryId: data.categoryId,
     storeLocation: data.storeLocation ?? null,
-    motorcycleModel: data.motorcycleModel ?? null,
+    motorcycleModel: vehicle
+      ? `${vehicle.vehicleBrand} ${vehicle.vehicleModel}`
+      : (data.motorcycleModel ?? null),
+    ...vehicle,
     createdBy: user.id,
   };
 
@@ -197,6 +242,8 @@ export async function listTickets(
     priorityId?: number;
     categoryId?: number;
     overdue?: boolean;
+    vehicleVin?: string;
+    vehicleModelId?: string;
   },
 ): Promise<Ticket[]> {
   const { overdue, ...rest } = q;
@@ -697,6 +744,7 @@ export async function updateBusinessInfo(
   patch: {
     storeLocation?: string;
     motorcycleModel?: string;
+    vehicleVin?: string | null;
     version: number;
   },
   user: AuthUser,
@@ -722,10 +770,21 @@ export async function updateBusinessInfo(
     );
   }
 
+  const vehicleChanged =
+    patch.vehicleVin !== undefined &&
+    (patch.vehicleVin ?? null) !== (ticket.vehicleVin ?? null);
+
+  // Se valida contra inventario ANTES de modificar el ticket.
+  const newVehicle =
+    vehicleChanged && patch.vehicleVin
+      ? await resolveVehicle(patch.vehicleVin)
+      : undefined;
+
   const from = {
     storeLocation: ticket.storeLocation,
     motorcycleModel: ticket.motorcycleModel,
   };
+  const fromVehicle = vehicleSnapshot(ticket);
 
   if (patch.storeLocation !== undefined) {
     ticket.storeLocation = patch.storeLocation;
@@ -735,8 +794,21 @@ export async function updateBusinessInfo(
     ticket.motorcycleModel = patch.motorcycleModel;
   }
 
-  return saveWithHistory(ticket, [
-    {
+  if (vehicleChanged) {
+    applyVehicle(ticket, newVehicle);
+    if (newVehicle) {
+      ticket.motorcycleModel = `${newVehicle.vehicleBrand} ${newVehicle.vehicleModel}`;
+    }
+  }
+
+  const businessChanged =
+    from.storeLocation !== ticket.storeLocation ||
+    from.motorcycleModel !== ticket.motorcycleModel;
+
+  const entries: HistoryInput[] = [];
+
+  if (businessChanged || !vehicleChanged) {
+    entries.push({
       actorId: user.id,
       action: 'business_info_updated',
       from,
@@ -744,8 +816,19 @@ export async function updateBusinessInfo(
         storeLocation: ticket.storeLocation,
         motorcycleModel: ticket.motorcycleModel,
       },
-    },
-  ]);
+    });
+  }
+
+  if (vehicleChanged) {
+    entries.push({
+      actorId: user.id,
+      action: 'vehicle_linked',
+      from: fromVehicle,
+      to: vehicleSnapshot(ticket),
+    });
+  }
+
+  return saveWithHistory(ticket, entries);
 }
 
 export async function updateTicket(

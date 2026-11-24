@@ -14,6 +14,7 @@ import {
   type ApplyResolutionContent,
 } from '../services/aiAssistant'
 import { hasPermission } from '../services/session'
+import { INVENTORY_READ } from '../services/inventory'
 
 /**
  * Asistente de IA para soporte (AIR-001) + revisión humana (AIR-004) + AIR-006.
@@ -54,6 +55,9 @@ const error = ref('')
 const listRef = ref<HTMLDivElement | null>(null)
 
 const canValidate = computed(() => hasPermission('ai:validate'))
+// Paso 12: sin inventory:read no se muestra la fuente "Inventario" aunque el backend la enviara.
+const canSeeInventory = computed(() => hasPermission(INVENTORY_READ))
+const rootRef = ref<HTMLElement | null>(null)
 const isManager = computed(() => hasPermission('ai:sources:review'))
 
 async function submit() {
@@ -202,6 +206,24 @@ async function confirmApply(turn: Turn) {
   }
 }
 
+const VEHICLE_QUESTION =
+  'Con los datos de la motocicleta de este ticket (modelo, año, garantía y refacciones compatibles), ¿qué debo revisar para atender la falla?'
+
+/**
+ * Paso 12: acción rápida "Preguntar a la IA sobre esta moto".
+ * Reutiliza el flujo normal de `submit` (mismo ticketId, mismos permisos y
+ * validaciones del backend). No hace nada si no hay ticket o ya hay una consulta en curso.
+ */
+async function askAboutVehicle() {
+  if (!props.ticketId || sending.value) return
+  question.value = VEHICLE_QUESTION
+  await nextTick()
+  rootRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  await submit()
+}
+
+defineExpose({ askAboutVehicle })
+
 async function scrollToEnd() {
   await nextTick()
   if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
@@ -216,7 +238,7 @@ function formatDate(dateString: string) {
 </script>
 
 <template>
-  <section class="card assistant" aria-label="Asistente de IA">
+  <section ref="rootRef" class="card assistant" aria-label="Asistente de IA">
     <h2>Asistente de soporte</h2>
     <p class="hint">
       Pregunta al asistente sobre manuales, artículos aprobados y soluciones
@@ -262,7 +284,10 @@ function formatDate(dateString: string) {
             Contexto usado: ticket #{{ props.ticketId }}.
           </p>
           
-          <AIReferences :references="turn.answer.references" />
+          <AIReferences
+            :references="turn.answer.references"
+            :inventory="canSeeInventory ? turn.answer.inventory : null"
+          />
           <p v-if="turn.answer.status === 'answered' && turn.answer.transparency?.status === 'supported' && turn.answer.references.length > 0" class="ai-disclaimer">⚠ Respuesta generada por IA. Revisa antes de aplicar.</p>
 
           <!-- AIR-004: acciones de revisión. Sólo para usuarios con ai:validate.

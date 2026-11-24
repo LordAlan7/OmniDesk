@@ -9,6 +9,9 @@ import {
   sessionUser,
 } from '../services/session'
 import TicketTrackingPanel from '../components/TicketTrackingPanel.vue'
+import PartsLookupPanel from '../components/PartsLookupPanel.vue'
+import TicketVehiclePanel from '../components/TicketVehiclePanel.vue'
+import { getVehicleByVin, type Product, type Vehicle } from '../services/inventory'
 import AssistantPanel from '../components/AssistantPanel.vue'
 import {
   addInvestigation,
@@ -90,6 +93,35 @@ const resolutionInput = ref<HTMLTextAreaElement | null>(null)
 const reopenReason = ref('')
 const reopenError = ref('')
 const reopenSuccess = ref('')
+
+// Paso 11: refacciones compatibles dentro del ticket.
+const panelVehicle = ref<Vehicle | null>(null)
+const canUsePartsPanel = computed(() => hasPermission('inventory:read'))
+
+async function resolvePanelVehicle(current: Ticket): Promise<void> {
+  panelVehicle.value = null
+  if (!current.vehicleVin || !canUsePartsPanel.value) return
+  try {
+    panelVehicle.value = await getVehicleByVin(current.vehicleVin)
+  } catch {
+    // Sin moto resuelta el panel cae al catálogo general.
+  }
+}
+
+/** Paso 11: copia el SKU de la refacción elegida al texto de la resolución. */
+function onPartSelected(product: Product): void {
+  const tag = `Refacción sugerida (SKU ${product.sku}): ${product.name}`
+  resolutionText.value = resolutionText.value.trim() ? `${resolutionText.value.trim()}\n${tag}` : tag
+  onResolutionInput()
+}
+
+// Paso 12: acción rápida "Preguntar a la IA sobre esta moto".
+const assistantPanel = ref<InstanceType<typeof AssistantPanel> | null>(null)
+const canAskAboutVehicle = computed(() => hasPermission('ai:query'))
+
+function askAiAboutVehicle(): void {
+  void assistantPanel.value?.askAboutVehicle()
+}
 
 
 // Cierre formal
@@ -401,6 +433,7 @@ async function loadTicket() {
       return
     }
     ticket.value = result
+    await resolvePanelVehicle(result)
     if (canPrioritize.value) await loadPriorities()
     await loadKnowledgeArticles()
     await loadHistory(id, sequence)
@@ -941,6 +974,29 @@ watch(
 
         <TicketTrackingPanel :ticket="ticket" @changed="loadTicket" />
 
+        <!-- Paso 12: motocicleta vinculada (solo con inventory:read). -->
+        <section
+          v-if="canUsePartsPanel"
+          class="card"
+          data-testid="ticket-vehicle-section"
+        >
+          <TicketVehiclePanel
+            :ticket="ticket"
+            :vehicle="panelVehicle"
+            :can-ask-ai="canAskAboutVehicle"
+            @ask-ai="askAiAboutVehicle"
+          />
+        </section>
+
+        <!-- Paso 11: refacciones compatibles para este ticket (inventario). -->
+        <section
+          v-if="canUsePartsPanel && ticket.status !== 'Closed'"
+          class="card"
+          data-testid="ticket-parts-panel"
+        >
+          <PartsLookupPanel :vehicle="panelVehicle" compact @select="onPartSelected" />
+        </section>
+
         <!-- NFR-006 + FR-009: atención del ticket con requisitos de verificación. -->
         <section v-if="canStartWork || canResolve || canReopenWork" class="card technician-actions" :aria-busy="technicianBusy">
           <h2>Atención del ticket</h2>
@@ -1170,6 +1226,7 @@ watch(
              lo decide el backend; aquí solo ocultamos la UI a quien no lo tenga. -->
         <AssistantPanel
           v-if="ticket && hasPermission('ai:query')"
+          ref="assistantPanel"
           :ticket-id="ticket.id"
         />
         <QuotationPanel

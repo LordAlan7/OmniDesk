@@ -1,111 +1,189 @@
-
 import { Router } from 'express';
 import { z } from 'zod';
+import { PERMISSIONS, requirePermission } from '../../shared/authorization';
 import { Errors } from '../../shared/errors';
-import { ok, paginationSchema } from '../../shared/http';
-import { can } from '../../shared/authorization/policy';
-import { PERMISSIONS } from '../../shared/authorization/permissions';
-import { authenticate, currentUser } from '../../shared/security/guards';
-import { InventoryService } from './inventory.service';
+import { ok } from '../../shared/http';
+import { authenticate } from '../../shared/security/guards';
+import { getInventoryProvider } from './index';
 
+/**
+ * Rutas de solo lectura del inventario (contrato v1.0, §3).
+ * Autenticación por sesión + permiso INVENTORY_READ. La credencial de
+ * dispositivo nunca sale del backend: la usa el proveedor, no estas rutas.
+ */
 export const inventoryRouter = Router();
 
-const inventoryService = new InventoryService();
+/** Instancia única: conserva circuit breaker y caché entre peticiones (§9). */
+const inventory = getInventoryProvider();
 
-const searchSchema = paginationSchema.extend({
-  search: z.string().trim().max(100).optional(),
-  status: z.string().trim().max(50).optional(),
-}).strict();
+/** §10: filtros de query de GET /inventory/products (strings → coerce). */
+const productQuerySchema = z.object({
+  search: z.string().trim().min(2).max(80).optional(),
+  categoryId: z.uuid().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
 
-const vinSchema = z.string().trim().min(1).max(50);
-const codeSchema = z.string().trim().min(1).max(100);
-const idSchema = z.string().uuid();
+/**
+ * Express 5 tipa los path params como string | string[] (params repetibles);
+ * en estas rutas siempre es un string simple. Se estrecha y valida aquí.
+ */
+function pathParam(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw Errors.validation([{ field, message: `El parámetro "${field}" es inválido.` }]);
+  }
+  return value;
+}
 
-inventoryRouter.use(authenticate);
-
-inventoryRouter.use((req, _res, next) => {
-  try {
-    if (!can(currentUser(req), PERMISSIONS.INVENTORY_READ)) {
-      throw Errors.forbidden();
+inventoryRouter.get(
+  '/inventory/vehicles/by-vin/:vin',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getVehicleByVin(pathParam(req.params.vin, 'vin')));
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    next();
-  } catch (cause) {
-    next(cause);
-  }
-});
-
-inventoryRouter.get('/vehicles', async (req, res, next) => {
-  try {
-    const query = searchSchema.parse(req.query);
-    const result = await inventoryService.searchVehicles(query);
-    ok(res, result);
-  } catch (cause) {
-    next(cause);
-  }
-});
-
-inventoryRouter.get('/vehicles/by-vin/:vin', async (req, res, next) => {
-  try {
-    const vin = vinSchema.parse(req.params.vin);
-    const vehicle = await inventoryService.getVehicleByVin(vin);
-
-    if (!vehicle) {
-      throw Errors.notFound('Vehicle');
+inventoryRouter.get(
+  '/inventory/vehicles/:id',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getVehicleById(pathParam(req.params.id, 'id')));
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    ok(res, vehicle);
-  } catch (cause) {
-    next(cause);
-  }
-});
-
-inventoryRouter.get('/vehicles/:id/compatible-products', async (req, res, next) => {
-  try {
-    const vehicleId = idSchema.parse(req.params.id);
-    const products = await inventoryService.getCompatibleProducts(vehicleId);
-    ok(res, products);
-  } catch (cause) {
-    next(cause);
-  }
-});
-
-inventoryRouter.get('/vehicles/:id/warranty', async (req, res, next) => {
-  try {
-    const vehicleId = idSchema.parse(req.params.id);
-    const warranty = await inventoryService.getWarrantyByVehicleId(vehicleId);
-
-    if (!warranty) {
-      throw Errors.notFound('Warranty');
+inventoryRouter.get(
+  '/inventory/vehicles/:id/events',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getVehicleEvents(pathParam(req.params.id, 'id')));
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    ok(res, warranty);
-  } catch (cause) {
-    next(cause);
-  }
-});
-
-inventoryRouter.get('/products', async (req, res, next) => {
-  try {
-    const query = searchSchema.parse(req.query);
-    const result = await inventoryService.searchProducts(query);
-    ok(res, result);
-  } catch (cause) {
-    next(cause);
-  }
-});
-
-inventoryRouter.get('/products/by-code/:code', async (req, res, next) => {
-  try {
-    const code = codeSchema.parse(req.params.code);
-    const product = await inventoryService.getProductByCode(code);
-
-    if (!product) {
-      throw Errors.notFound('Product');
+inventoryRouter.get(
+  '/inventory/vehicles/:id/warranty',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getVehicleWarranty(pathParam(req.params.id, 'id')));
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    ok(res, product);
-  } catch (cause) {
-    next(cause);
-  }
-});
+inventoryRouter.get(
+  '/inventory/vehicles/:id/compatible-products',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getCompatibleProducts(pathParam(req.params.id, 'id')));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+inventoryRouter.get(
+  '/inventory/products',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      const check = productQuerySchema.safeParse(req.query);
+      if (!check.success) {
+        throw Errors.validation(
+          check.error.issues.map((issue) => ({
+            field: issue.path.join('.') || 'query',
+            message: issue.message,
+          })),
+        );
+      }
+      const result = await inventory.listProducts(check.data);
+      res.json({ data: result.data, meta: result.meta });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+inventoryRouter.get(
+  '/inventory/products/by-code/:value',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getProductByCode(pathParam(req.params.value, 'value')));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+inventoryRouter.get(
+  '/inventory/products/:id',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getProductById(pathParam(req.params.id, 'id')));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+inventoryRouter.get(
+  '/inventory/products/:id/stock',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getProductStock(pathParam(req.params.id, 'id')));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+inventoryRouter.get(
+  '/inventory/vehicle-models',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (_req, res, next) => {
+    try {
+      ok(res, await inventory.listVehicleModels());
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+inventoryRouter.get(
+  '/inventory/vehicle-models/:id',
+  authenticate,
+  requirePermission(PERMISSIONS.INVENTORY_READ),
+  async (req, res, next) => {
+    try {
+      ok(res, await inventory.getVehicleModelById(pathParam(req.params.id, 'id')));
+    } catch (error) {
+      next(error);
+    }
+  },
+);

@@ -25,6 +25,8 @@ export interface TicketFilter {
   status?: TicketStatus;
   priorityId?: number;
   categoryId?: number;
+  vehicleVin?: string;
+  vehicleModelId?: string;
 }
 
 // Implementación en memoria para pruebas.
@@ -84,6 +86,11 @@ const ticketsMemoryRepository = {
       | 'createdBy'
       | 'storeLocation'
       | 'motorcycleModel'
+      | 'vehicleVin'
+      | 'vehicleModelId'
+      | 'vehicleBrand'
+      | 'vehicleModel'
+      | 'vehicleYear'
     >,
   aiValidation?: AiCreationApproval): Promise<Ticket> {
     if (aiValidation) {
@@ -117,6 +124,11 @@ const ticketsMemoryRepository = {
       knowledgeArticleId: null,
       storeLocation: data.storeLocation || null,
       motorcycleModel: data.motorcycleModel || null,
+      vehicleVin: data.vehicleVin ?? null,
+      vehicleModelId: data.vehicleModelId ?? null,
+      vehicleBrand: data.vehicleBrand ?? null,
+      vehicleModel: data.vehicleModel ?? null,
+      vehicleYear: data.vehicleYear ?? null,
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,
@@ -144,6 +156,34 @@ const ticketsMemoryRepository = {
       metadata: { to: 'Open' },
     });
 
+    if (data.vehicleVin) {
+      const vehicle = {
+        vin: data.vehicleVin,
+        modelId: data.vehicleModelId ?? null,
+        brand: data.vehicleBrand ?? null,
+        model: data.vehicleModel ?? null,
+        year: data.vehicleYear ?? null,
+      };
+
+      history.push({
+        id: nextHistoryId++,
+        ticketId: ticket.id,
+        actorId: data.createdBy,
+        action: 'vehicle_linked',
+        to: vehicle,
+        correlationId: currentCorrelationId(),
+        createdAt: now,
+      });
+
+      recordAuditInMemory({
+        action: 'ticket.vehicle_linked',
+        entity: 'ticket',
+        entityId: ticket.id,
+        actorId: data.createdBy,
+        metadata: { to: vehicle },
+      });
+    }
+
     return { ...ticket };
   },
 
@@ -162,7 +202,11 @@ const ticketsMemoryRepository = {
           (filter.priorityId === undefined ||
             t.priorityId === filter.priorityId) &&
           (filter.categoryId === undefined ||
-            t.categoryId === filter.categoryId),
+            t.categoryId === filter.categoryId) &&
+          (filter.vehicleVin === undefined ||
+            t.vehicleVin === filter.vehicleVin) &&
+          (filter.vehicleModelId === undefined ||
+            t.vehicleModelId === filter.vehicleModelId),
       )
       .slice()
       .reverse();

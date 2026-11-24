@@ -1,7 +1,7 @@
 import { can, PERMISSIONS } from '../../../shared/authorization';
 import { Errors } from '../../../shared/errors';
 import type { AuthUser } from '../../../shared/types';
-import type { KnowledgeSourceSnapshot } from '../../knowledge';
+import type { KnowledgeSourceSnapshot } from './sources.types';
 import { getSourceReader } from './source-reader';
 import { chunkText } from './sources.policy';
 import { sourcesRepository as repository, type SourceAudit } from './sources.repository';

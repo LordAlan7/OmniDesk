@@ -6,6 +6,27 @@
  */
 export type AiSourceType = 'article' | 'document';
 
+/** Copia propia del contrato de snapshot de conocimiento (el módulo AI no importa `knowledge`). */
+export type SourceContent =
+  | { kind: 'text'; text: string }
+  | { kind: 'pdf'; buffer: Buffer };
+
+export interface KnowledgeSourceSnapshot {
+  type: AiSourceType;
+  id: number;
+  title: string;
+  /** Versión del contenido (artículo: número de versión; documento: identificador de versión del archivo). */
+  version: string;
+  /** Huella SHA-256 del contenido: una edición distinta nunca hereda la aprobación. */
+  contentHash: string;
+  /** Aprobado (artículo) o publicado (documento). Borradores y retirados no son elegibles. */
+  eligible: boolean;
+  ineligibleReason?: string;
+  /** Permiso de lectura humana del usuario consultado (true cuando no se consulta por usuario). */
+  visibleToUser: boolean;
+  loadContent(): Promise<SourceContent>;
+}
+
 export const AI_SOURCE_TYPES: readonly AiSourceType[] = ['article', 'document'];
 
 export type AuthorizationStatus =

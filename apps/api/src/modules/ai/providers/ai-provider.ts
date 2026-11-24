@@ -24,7 +24,7 @@ export interface AIContextItem {
   /** Id de la fuente (compatibilidad: antes solo había artículos). */
   articleId: number;
   content: string;
-  sourceType?: 'article' | 'document' | 'ticket';
+  sourceType?: 'article' | 'document' | 'ticket' | 'inventory';
   sourceId?: number;
   sourceVersion?: string;
   chunkIndex?: number;

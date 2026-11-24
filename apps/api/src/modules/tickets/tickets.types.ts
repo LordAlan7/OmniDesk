@@ -49,6 +49,20 @@ export interface Ticket {
   version: number;
   storeLocation: string | null;
   motorcycleModel: string | null;
+  /** Paso 6: referencia a la moto del inventario + copia mínima (historia del ticket). */
+  vehicleVin?: string | null;
+  vehicleModelId?: string | null;
+  vehicleBrand?: string | null;
+  vehicleModel?: string | null;
+  vehicleYear?: number | null;
+}
+
+export interface TicketVehicle {
+  vehicleVin: string;
+  vehicleModelId: string | null;
+  vehicleBrand: string;
+  vehicleModel: string;
+  vehicleYear: number;
 }
 
 export interface TicketHistoryEntry {

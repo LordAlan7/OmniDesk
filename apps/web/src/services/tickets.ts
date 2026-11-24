@@ -13,6 +13,12 @@ export interface Ticket {
   description: string
   storeLocation?: string | null
   motorcycleModel?: string | null
+  /** Paso 6: moto del inventario vinculada (el backend ya devuelve esta copia mínima). */
+  vehicleVin?: string | null
+  vehicleModelId?: string | null
+  vehicleBrand?: string | null
+  vehicleModel?: string | null
+  vehicleYear?: number | null
   categoryId: number
   priorityId: number | null
   status: TicketStatus
@@ -285,6 +291,8 @@ export interface CreateTicketPayload {
   categoryId: number
   storeLocation: string
   motorcycleModel: string
+  /** Paso 10: VIN opcional; el backend lo valida contra inventario y guarda la copia mínima. */
+  vehicleVin?: string
 }
 
 // Etiquetas en español usadas por las vistas del NFR-006.

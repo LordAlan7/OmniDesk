@@ -23,6 +23,8 @@ export interface AITransparency {
   message: string
   requiresHumanReview: boolean
   missingInformation: string[]
+  /** Avisos informativos del backend (p. ej. inventario no disponible). */
+  notices?: string[]
 }
 
 export interface AssistantReference {
@@ -34,6 +36,23 @@ export interface AssistantReference {
   chunkIndex: number
 }
 
+/**
+ * Paso 12: origen "inventario" usado como contexto de la IA. Es un dato de
+ * contexto, no una cita (no va en `references`). El backend lo envía en `null`
+ * cuando el usuario no tiene `ai:context:inventory` o el ticket no tiene VIN.
+ */
+export type InventoryUsage =
+  | {
+      status: 'used'
+      source: 'inventory'
+      vin: string
+      vehicle: string
+      fetchedAt: string
+      warrantyStatus: string | null
+      compatibleProducts: number
+    }
+  | { status: 'unavailable'; source: 'inventory'; fetchedAt: string }
+
 export interface AssistantAnswer {
   id: number
   status: AssistantStatus
@@ -41,6 +60,8 @@ export interface AssistantAnswer {
   references: AssistantReference[]
   aiGenerated: true
   transparency?: AITransparency
+  /** Paso 12: inventario usado como contexto (null/ausente si no aplica). */
+  inventory?: InventoryUsage | null
   createdAt: string
 }
 

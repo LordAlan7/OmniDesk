@@ -15,12 +15,21 @@ import { aiSourcesRouter } from './sources/sources.routes';
 import { canTakeDecision, recordReviewPersisted, } from './reviews/reviews';
 import { reviewSchema, applySchema, applyInvestigationSchema, applyResolutionSchema, } from './reviews/reviews.schemas';
 import { reviewsService } from './reviews/reviews.service';
-import { addInvestigation, resolveTicket, createTicket, listCategories, } from '../tickets';
+import { addInvestigation, resolveTicket, createTicket, listCategories, } from './ai.ports';
 import { assertAiValidated, assertAiTicketCreationValidated } from './validation/guard';
 import { hashContent } from './validation/validations.service';
 import { quotationsRouter } from './quotations/quotations.routes';
 import { askSchema, ticketSuggestionRequestSchema, aiTicketSuggestionConfirmSchema, } from './ai.schemas';
 import { generateTicketSuggestion, confirmSuggestion, discardSuggestion, getConfirmedSuggestion, removeSuggestion, getSuggestionForUser, } from './ai.ticket-suggestions';
+/**
+ * Paso 8 — frontera HTTP interna del módulo AI.
+ * Versión del contrato expuesto bajo /api/v1/ai/* (documentado en docs/AI-CONTRACT.md).
+ * v1 conserva las rutas existentes; cualquier cambio incompatible (rutas, campos o
+ * códigos) sube esta versión y se avisa a los consumidores antes de desplegar el
+ * módulo por separado.
+ */
+export const AI_CONTRACT_VERSION = 'v1';
+
 export const aiRouter = Router();
 // AIR-005 -> AIR-007: la sugerencia vive en memoria; la interacción y aprobación en PostgreSQL.
 const suggestionInteractionIds = new Map<number, number>();
@@ -125,6 +134,7 @@ aiRouter.post('/ai/ask', authenticate, requirePermission(PERMISSIONS.AI_QUERY), 
             references: answer.references,
             aiGenerated: true,
             transparency: transparencyForAuthorizedAnswer(answer),
+            inventory: answer.status === 'answered' ? (answer.inventory ?? null) : null,
             createdAt: interaction.createdAt,
         }, 201);
     }
@@ -284,6 +294,7 @@ aiRouter.post('/ai/interactions/:id/review', authenticate, requirePermission(PER
                 references: followUpAnswer.references,
                 aiGenerated: true,
                 transparency: transparencyForAuthorizedAnswer(followUpAnswer),
+                inventory: followUpAnswer.status === 'answered' ? (followUpAnswer.inventory ?? null) : null,
                 createdAt: followUpInteraction.createdAt,
             };
         }

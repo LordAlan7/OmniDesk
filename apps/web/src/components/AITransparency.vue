@@ -58,6 +58,9 @@ const display = computed(() => {
     missingInformation: [],
   }
 })
+
+/** Paso 12: avisos informativos (p. ej. inventario no disponible). */
+const notices = computed(() => props.transparency?.notices ?? [])
 </script>
 
 <template>
@@ -70,6 +73,19 @@ const display = computed(() => {
 
     <h4>{{ display.title }}</h4>
     <p>{{ display.message }}</p>
+
+    <ul
+      v-if="notices.length"
+      class="ai-notices"
+      data-testid="ai-transparency-notices"
+    >
+      <li
+        v-for="notice in notices"
+        :key="notice"
+      >
+        {{ notice }}
+      </li>
+    </ul>
 
     <ul v-if="display.missingInformation.length">
       <li
@@ -131,5 +147,9 @@ const display = computed(() => {
 .ai-transparency ul {
   margin: 0.75rem 0;
   padding-left: 1.5rem;
+}
+
+.ai-notices li {
+  color: #92400e;
 }
 </style>

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { AssistantReference } from '../services/aiAssistant'
+import type { AssistantReference, InventoryUsage } from '../services/aiAssistant'
 import { apiRequest } from '../services/api'
 import { getDocument, downloadDocument } from '../services/documents'
 
 const props = defineProps<{
   references: AssistantReference[]
+  /** Paso 12: inventario usado como contexto (no es una cita). */
+  inventory?: InventoryUsage | null
 }>()
 
 interface GroupedReference {
@@ -61,6 +63,28 @@ const groupedReferences = computed(() => {
 
   return [...grouped.values()]
 })
+
+const usedInventory = computed(() =>
+  props.inventory?.status === 'used' ? props.inventory : null,
+)
+
+const warrantyLabels: Record<string, string> = {
+  ACTIVE: 'Vigente',
+  EXPIRED: 'Vencida',
+  VOIDED: 'Anulada',
+  NOT_APPLICABLE: 'No aplica',
+}
+
+function warrantyLabel(value: string | null): string {
+  if (!value) return 'No disponible'
+  return warrantyLabels[value] ?? value
+}
+
+function formatConsulted(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+}
 
 async function openReference(reference: GroupedReference) {
   if (busy.value !== null) return
@@ -187,6 +211,28 @@ async function openReference(reference: GroupedReference) {
         </div>
       </li>
     </ul>
+
+    <div
+      v-if="usedInventory"
+      class="inventory-source"
+      data-testid="ai-inventory-source"
+    >
+      <strong>Fuente: Inventario</strong>
+      <p>
+        Motocicleta consultada: {{ usedInventory.vehicle }}
+        (VIN {{ usedInventory.vin }})
+      </p>
+      <p>Garantía: {{ warrantyLabel(usedInventory.warrantyStatus) }}</p>
+      <p>
+        Refacciones compatibles consideradas:
+        {{ usedInventory.compatibleProducts }}
+      </p>
+      <p>Consultado: {{ formatConsulted(usedInventory.fetchedAt) }}</p>
+      <p class="reference-note">
+        Dato de contexto del inventario: no es una cita verificable.
+        Confírmalo en la sección "Motocicleta" del ticket.
+      </p>
+    </div>
   </section>
 </template>
 
@@ -243,5 +289,19 @@ async function openReference(reference: GroupedReference) {
   border-left: 3px solid #2563eb;
   background: white;
   white-space: pre-wrap;
+}
+
+.inventory-source {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #d1d5db;
+  border-left: 4px solid #0f766e;
+  border-radius: 10px;
+  background: #f0fdfa;
+  color: #1f2937;
+}
+
+.inventory-source p {
+  margin: 0.4rem 0;
 }
 </style>

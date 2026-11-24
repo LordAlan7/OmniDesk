@@ -13,7 +13,7 @@ import type {
   AiSourceAuthorization,
   SourceReference,
 } from './sources/sources.types';
-import type { KnowledgeSourceSnapshot } from '../knowledge';
+import type { KnowledgeSourceSnapshot } from './sources/sources.types';
 import type { AuthUser } from '../../shared/types';
 
 describe('NFR-003 - respaldo vigente', () => {

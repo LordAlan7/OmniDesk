@@ -1,12 +1,18 @@
 /**
  * Módulo AI - AI Assistant + AI Validation & Review
  * Requisitos: FR-013, FR-014, FR-015, FR-021, NFR-003, AIR-004
- * Dependencias permitidas: knowledge, tickets, audit
+ * Dependencias permitidas: audit (módulo hoja)
+ * Paso 8: tickets, knowledge e inventory solo vía puertos inyectados (ai.ports.ts)
  * API pública: otros módulos SOLO deben importar desde este archivo.
  */
 export { aiRouter } from './ai.routes';
 export type { AIProvider, AIAnswer } from './providers/ai-provider';
 export { createAIProvider } from './providers';
+
+// Paso 8 (servicio de IA separable): frontera con puertos inyectados.
+// app.ts (raíz de composición) llama configureAiPorts() con los adaptadores reales.
+export { configureAiPorts, resetAiPorts } from './ai.ports';
+export type { AiPorts, TicketsPort, KnowledgePort, InventoryPort } from './ai.ports';
 
 // AIR-002: fuentes de conocimiento autorizadas y recuperación filtrada.
 export { askWithAuthorizedSources, INSUFFICIENT_INFORMATION } from './ai.service';

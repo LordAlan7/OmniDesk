@@ -13,6 +13,8 @@ export interface AITransparency {
   message: string;
   requiresHumanReview: boolean;
   missingInformation: string[];
+  /** Avisos informativos (p. ej. inventario no disponible). */
+  notices?: string[];
 }
 
 export type TransparencyDecision =
@@ -95,10 +97,19 @@ export function transparencyForAuthorizedAnswer(
   answer: AuthorizedAnswer,
 ): AITransparency {
   if (answer.status === 'answered') {
-    return buildAITransparency({
+    const transparency = buildAITransparency({
       kind: 'supported',
       verifiedReferenceCount: answer.references.length,
     });
+
+    return answer.inventory?.status === 'unavailable'
+      ? {
+          ...transparency,
+          notices: [
+            'No se pudo consultar el inventario; la respuesta se basa solo en la base de conocimiento.',
+          ],
+        }
+      : transparency;
   }
 
   if (answer.status === 'needs_more_info') {

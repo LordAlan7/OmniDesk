@@ -1,9 +1,10 @@
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ApiError } from '@/api/http'
 import {
   clearSession,
   hasEveryPermission,
+  hasPermission,
   refreshSession,
 } from '../services/session'
 
@@ -110,4 +111,17 @@ export function useFormAccess(
     ensureAccess,
     handleAccessError,
   }
+}
+
+/**
+ * Paso 9: visibilidad de secciones por permiso (p. ej. INVENTORY_READ para
+ * las secciones de inventario). A diferencia de useFormAccess —que protege
+ * la vista completa y redirige a /access-denied—, este helper solo oculta o
+ * muestra bloques de la interfaz según los permisos vigentes de la sesión;
+ * nunca navega. `visible` es reactivo: reacciona al refresco de la sesión.
+ */
+export function usePermissionVisibility(permission: string) {
+  const visible = computed(() => hasPermission(permission))
+
+  return { visible }
 }

@@ -2,6 +2,12 @@ import { can, PERMISSIONS } from '../../shared/authorization';
 import { Errors } from '../../shared/errors';
 import type { AuthUser } from '../../shared/types';
 import { buildTicketContext, frameTicketContext } from './context/ticket-context';
+import {
+  buildInventoryContext,
+  frameInventoryContext,
+  summarizeInventory,
+  type InventoryUsage,
+} from './context/inventory-context';
 import { createAIProvider } from './providers';
 import type { AIProvider } from './providers/ai-provider';
 import { retrieveAuthorizedContext } from './sources/retrieval';
@@ -26,6 +32,8 @@ export type AuthorizedAnswer =
       providedContext: any[];
       citations: any[];
       generationConfig: Record<string, unknown>;
+      // Paso 7: origen "inventario" usado como contexto (o no disponible).
+      inventory?: InventoryUsage | undefined;
     };
 
 export async function askWithAuthorizedSources(
@@ -68,10 +76,20 @@ export async function askWithAuthorizedSources(
     return { status: 'insufficient_information', message: INSUFFICIENT_INFORMATION, references: [], aiGenerated: true };
   }
 
+  // Paso 7: se consulta inventario solo cuando ya se va a llamar al modelo
+  // (no en respuestas tempranas) y nunca propaga errores de inventario.
+  const inventoryContext =
+    options.ticketId === undefined
+      ? undefined
+      : await buildInventoryContext(options.ticketId, user);
+
   // AIR-007: Armamos el contexto exacto que se le enviará al modelo.
   const contextToSend = [
     ...(ticketContext
       ? [{ articleId: 0, sourceType: 'ticket' as const, sourceId: ticketContext.ticketId, content: frameTicketContext(ticketContext) }]
+      : []),
+    ...(inventoryContext?.status === 'available'
+      ? [{ articleId: 0, sourceType: 'inventory' as const, sourceId: options.ticketId ?? 0, content: frameInventoryContext(inventoryContext) }]
       : []),
     ...retrieval.fragments.map((fragment) => {
       const { content, ...reference } = fragment;
@@ -137,6 +155,7 @@ export async function askWithAuthorizedSources(
     aiGenerated: true,
     // AIR-007: Devolvemos la trazabilidad para que se guarde en la base de datos
     providedContext: contextToSend,
+    inventory: inventoryContext ? summarizeInventory(inventoryContext) : undefined,
     citations: answer.citations || [],
     generationConfig: { 
       provider: 'default',

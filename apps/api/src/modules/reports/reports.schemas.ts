@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import { vinSchema } from '../inventory';
 
 const dateSchema = z
   .string()
@@ -26,6 +27,10 @@ export const reportTicketFiltersSchema = z
     priorityId: z.coerce.number().int().positive().optional(),
 
     technicianId: z.coerce.number().int().positive().optional(),
+
+    vehicleVin: vinSchema.optional(),
+
+    vehicleModelId: z.string().trim().min(1).max(64).optional(),
 
     from: dateSchema.optional(),
 

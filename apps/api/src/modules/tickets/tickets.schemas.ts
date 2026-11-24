@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { paginationSchema } from '../../shared/http';
 import { STRING_LIMITS, MESSAGES } from '../../shared/validation';
 import { PRIORITIES, TICKET_STATUSES } from './tickets.types';
+import { vinSchema } from '../inventory';
 
 const priorityIds = Object.keys(PRIORITIES).map(Number);
 
@@ -38,9 +39,15 @@ export const createTicketSchema = z
       .string()
       .trim()
       .min(motorcycleModelLimits.min, MESSAGES.required('El modelo de motocicleta'))
-      .max(motorcycleModelLimits.max, MESSAGES.tooLong('El modelo de motocicleta', motorcycleModelLimits.max)),
+      .max(motorcycleModelLimits.max, MESSAGES.tooLong('El modelo de motocicleta', motorcycleModelLimits.max))
+      .optional(),
+    vehicleVin: vinSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => v.vehicleVin !== undefined || v.motorcycleModel !== undefined, {
+    message: MESSAGES.required('El modelo de motocicleta o el VIN'),
+    path: ['motorcycleModel'],
+  });
 
 export const updateTicketSchema = z
   .object({
@@ -98,6 +105,7 @@ export const businessInfoUpdateSchema = z
       .min(motorcycleModelLimits.min, MESSAGES.required('El modelo de motocicleta'))
       .max(motorcycleModelLimits.max, MESSAGES.tooLong('El modelo de motocicleta', motorcycleModelLimits.max))
       .optional(),
+    vehicleVin: vinSchema.nullable().optional(),
     version: z
       .number()
       .int()
@@ -113,6 +121,8 @@ export const listTicketsSchema = paginationSchema.extend({
   priorityId: z.coerce.number().int().optional(),
   categoryId: z.coerce.number().int().optional(),
   overdue: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+  vehicleVin: vinSchema.optional(),
+  vehicleModelId: z.string().trim().min(1).max(64).optional(),
 });
 
 export const prioritySchema = z

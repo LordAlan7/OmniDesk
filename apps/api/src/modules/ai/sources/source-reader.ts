@@ -1,10 +1,6 @@
 import type { AuthUser } from '../../../shared/types';
-import {
-  snapshotArticle,
-  snapshotDocument,
-  type KnowledgeSourceSnapshot,
-} from '../../knowledge';
-import type { AiSourceType } from './sources.types';
+import { aiPorts } from '../ai.ports';
+import type { AiSourceType, KnowledgeSourceSnapshot } from './sources.types';
 
 /**
  * Único punto por el que `ai/sources` consulta el estado real de una fuente en la biblioteca.
@@ -14,8 +10,13 @@ export interface SourceReader {
   read(type: AiSourceType, id: number, user: AuthUser | null): Promise<KnowledgeSourceSnapshot | null>;
 }
 
+/**
+ * Lector por defecto (paso 8): delega en el puerto de conocimiento inyectado por app.ts.
+ * El módulo `ai` ya no importa `knowledge`; el adaptador real (snapshotArticle/snapshotDocument)
+ * vive en la raíz de composición.
+ */
 export const knowledgeSourceReader: SourceReader = {
-  read: (type, id, user) => (type === 'article' ? snapshotArticle(id, user) : snapshotDocument(id, user)),
+  read: (type, id, user) => aiPorts().knowledge.readSource(type, id, user),
 };
 
 let reader: SourceReader = knowledgeSourceReader;

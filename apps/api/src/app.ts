@@ -1,4 +1,4 @@
-import cors from 'cors';
+﻿import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { env } from './config/env';
@@ -14,10 +14,16 @@ import {
 } from './shared/security/guards';
 
 import { aiRouter } from './modules/ai';
+import { configureAiPorts } from './modules/ai/ai.ports';
 import { auditRouter } from './modules/audit';
 import { authRouter } from './modules/auth';
 import { filesRouter } from './modules/files';
-import { knowledgeRouter, findApprovedArticleById } from './modules/knowledge';
+import {
+  knowledgeRouter,
+  findApprovedArticleById,
+  snapshotArticle,
+  snapshotDocument,
+} from './modules/knowledge';
 import { getArticle } from './modules/knowledge/knowledge.service';
 import {
   notificationsRouter,
@@ -28,6 +34,11 @@ import {
   ticketsRouter,
   hasPendingTicketsForTechnician,
   configureArticleReferenceChecker,
+  createTicket,
+  getTicketForUser,
+  listCategories,
+  resolveTicket,
+  addInvestigation,
 } from './modules/tickets';
 import {
   usersRouter,
@@ -38,6 +49,7 @@ import { ticketCategoriesRouter } from './modules/tickets/tickets.categories.rou
 import { accessibleTicketIdsForUser } from './modules/tickets';
 import { healthCheck } from './shared/middleware/health';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
+import { getInventoryProvider } from './modules/inventory';
 
 
 export function createApp() {
@@ -47,17 +59,39 @@ export function createApp() {
     hasPendingTicketsForTechnician,
   );
 
-  // FR-009: el módulo tickets valida referencias a artículos de conocimiento (FR-011)
-  // mediante inyección de dependencia. Así se rompe el ciclo
-  // tickets → knowledge → files → tickets, respetando architecture.test.ts.
+  // FR-009: el mÃ³dulo tickets valida referencias a artÃ­culos de conocimiento (FR-011)
+  // mediante inyecciÃ³n de dependencia. AsÃ­ se rompe el ciclo
+  // tickets â†’ knowledge â†’ files â†’ tickets, respetando architecture.test.ts.
   configureArticleReferenceChecker(
     findApprovedArticleById
   );
 
-  // FR-020: el módulo notifications revalida acceso a tickets al listar/contar
-  // notificaciones (decisión 3). Se inyecta el checker desde tickets para
-  // romper el ciclo notifications → tickets → knowledge → files → tickets.
+  // FR-020: el mÃ³dulo notifications revalida acceso a tickets al listar/contar
+  // notificaciones (decisiÃ³n 3). Se inyecta el checker desde tickets para
+  // romper el ciclo notifications â†’ tickets â†’ knowledge â†’ files â†’ tickets.
   configureAccessibleTicketIdsChecker(accessibleTicketIdsForUser);
+
+  // Paso 8: raíz de composición de la IA. El módulo ai consume tickets,
+  // conocimiento e inventario SOLO por estos puertos; para desplegarlo como
+  // servicio aparte basta sustituir estos adaptadores por clientes HTTP.
+  configureAiPorts({
+    tickets: {
+      getTicketForUser,
+      listCategories,
+      createTicket,
+      resolveTicket,
+      addInvestigation,
+    },
+    knowledge: {
+      readSource: (type, id, user) =>
+        type === 'article' ? snapshotArticle(id, user) : snapshotDocument(id, user),
+    },
+    inventory: {
+      getVehicleByVin: (vin) => getInventoryProvider().getVehicleByVin(vin),
+      getVehicleWarranty: (vehicleId) => getInventoryProvider().getVehicleWarranty(vehicleId),
+      getCompatibleProducts: (vehicleId) => getInventoryProvider().getCompatibleProducts(vehicleId),
+    },
+  });
 
   const app = express();
 
@@ -76,7 +110,7 @@ export function createApp() {
 
   const api = express.Router();
 
-// NFR-004: Health check con verificación de base de datos
+// NFR-004: Health check con verificaciÃ³n de base de datos
   api.get('/health', healthCheck);
 
   api.use(authRouter);

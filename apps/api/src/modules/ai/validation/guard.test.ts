@@ -3,7 +3,7 @@ import { assertAiValidated } from './guard';
 import { hashContent } from './validations.service';
 import * as repo from './validations.repository';
 
-import { getTicketForUser } from '../../tickets/tickets.service';
+import { getTicketForUser } from '../ai.ports';
 
 import { interactionsService } from '../interactions/interactions.service';
 import { assertInteractionCurrentlySupported } from '../interactions/interactions';
@@ -15,8 +15,8 @@ jest.mock('./validations.repository', () => ({
   markApplied: jest.fn(),
 }));
 
-// Simular los tickets sin acceder a la base.
-jest.mock('../../tickets/tickets.service', () => ({
+// Simular los tickets sin acceder a la base (paso 8: el guard usa el puerto, no el módulo).
+jest.mock('../ai.ports', () => ({
   getTicketForUser: jest.fn(),
 }));
 

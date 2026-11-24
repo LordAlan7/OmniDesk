@@ -41,6 +41,11 @@ interface TicketRow {
   version: number;
   store_location: string | null;
   motorcycle_model: string | null;
+  vehicle_vin: string | null;
+  vehicle_model_id: string | null;
+  vehicle_brand: string | null;
+  vehicle_model: string | null;
+  vehicle_year: number | null;
 }
 
 interface HistoryRow {
@@ -95,6 +100,11 @@ function toTicket(row: TicketRow): Ticket {
     version: row.version,
     storeLocation: row.store_location,
     motorcycleModel: row.motorcycle_model,
+    vehicleVin: row.vehicle_vin,
+    vehicleModelId: row.vehicle_model_id,
+    vehicleBrand: row.vehicle_brand,
+    vehicleModel: row.vehicle_model,
+    vehicleYear: row.vehicle_year,
   };
 }
 
@@ -164,6 +174,11 @@ export const postgresTicketsRepository = {
       | 'createdBy'
       | 'storeLocation'
       | 'motorcycleModel'
+      | 'vehicleVin'
+      | 'vehicleModelId'
+      | 'vehicleBrand'
+      | 'vehicleModel'
+      | 'vehicleYear'
     >,
   aiValidation?: AiCreationApproval): Promise<Ticket> {
     const client = await getPool().connect();
@@ -178,9 +193,14 @@ export const postgresTicketsRepository = {
            category_id,
            created_by,
            store_location,
-           motorcycle_model
+           motorcycle_model,
+           vehicle_vin,
+           vehicle_model_id,
+           vehicle_brand,
+           vehicle_model,
+           vehicle_year
          )
-         VALUES ($1, $2, $3, $4, $5, $6)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [
           data.title,
@@ -189,6 +209,11 @@ export const postgresTicketsRepository = {
           data.createdBy,
           data.storeLocation,
           data.motorcycleModel,
+          data.vehicleVin ?? null,
+          data.vehicleModelId ?? null,
+          data.vehicleBrand ?? null,
+          data.vehicleModel ?? null,
+          data.vehicleYear ?? null,
         ],
       );
 
@@ -223,6 +248,43 @@ export const postgresTicketsRepository = {
         actorId: data.createdBy,
         metadata: { to: 'Open' },
       });
+
+
+      if (data.vehicleVin) {
+        const vehicle = {
+          vin: data.vehicleVin,
+          modelId: data.vehicleModelId ?? null,
+          brand: data.vehicleBrand ?? null,
+          model: data.vehicleModel ?? null,
+          year: data.vehicleYear ?? null,
+        };
+
+        await client.query(
+          `INSERT INTO ticket_history (
+             ticket_id,
+             actor_id,
+             action,
+             to_value,
+             correlation_id
+           )
+           VALUES ($1, $2, $3, $4::jsonb, $5)`,
+          [
+            row.id,
+            data.createdBy,
+            'vehicle_linked',
+            JSON.stringify(vehicle),
+            currentCorrelationId(),
+          ],
+        );
+
+        await recordAuditInTransaction(client, {
+          action: 'ticket.vehicle_linked',
+          entity: 'ticket',
+          entityId: row.id,
+          actorId: data.createdBy,
+          metadata: { to: vehicle },
+        });
+      }
 
       if (aiValidation) {
         await applyAiCreationValidationInTransaction(client, {
@@ -300,6 +362,11 @@ export const postgresTicketsRepository = {
              root_cause = $16,
              resolution_observations = $17,
              knowledge_article_id = $18,
+             vehicle_vin = $19,
+             vehicle_model_id = $20,
+             vehicle_brand = $21,
+             vehicle_model = $22,
+             vehicle_year = $23,
              updated_at = clock_timestamp(),
              version = version + 1
          WHERE id = $11 AND version = $12
@@ -323,6 +390,11 @@ export const postgresTicketsRepository = {
           ticket.rootCause,
           ticket.resolutionObservations,
           ticket.knowledgeArticleId,
+          ticket.vehicleVin ?? null,
+          ticket.vehicleModelId ?? null,
+          ticket.vehicleBrand ?? null,
+          ticket.vehicleModel ?? null,
+          ticket.vehicleYear ?? null,
         ],
       );
 
@@ -455,12 +527,16 @@ export const postgresTicketsRepository = {
          AND ($2::text IS NULL OR status = $2)
          AND ($3::integer IS NULL OR priority_id = $3)
          AND ($4::integer IS NULL OR category_id = $4)
+         AND ($5::text IS NULL OR vehicle_vin = $5)
+         AND ($6::text IS NULL OR vehicle_model_id = $6)
        ORDER BY id DESC`,
       [
         filter.visibleTo,
         filter.status ?? null,
         filter.priorityId ?? null,
         filter.categoryId ?? null,
+        filter.vehicleVin ?? null,
+        filter.vehicleModelId ?? null,
       ],
     );
 

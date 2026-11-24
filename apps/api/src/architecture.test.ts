@@ -14,10 +14,12 @@ const ALLOWED: Record<string, string[]> = {
   notifications: ['tickets'],
   users: ['audit'],
   auth: ['users', 'audit'],
-  tickets: ['users', 'audit', 'notifications', 'knowledge'],
+  tickets: ['users', 'audit', 'notifications', 'knowledge', 'inventory'],
   files: ['tickets', 'audit', 'users'],
   knowledge: ['files', 'audit'],
-  ai: ['knowledge', 'tickets', 'audit'],
+  // Paso 8: el módulo ai consume tickets/knowledge/inventory SOLO por puertos
+  // inyectados (ai.ports.ts + app.ts). Su única dependencia de módulo es audit.
+  ai: ['audit'],
   reports: ['tickets'],
   inventory: [],
 };

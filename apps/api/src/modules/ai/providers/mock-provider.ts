@@ -37,7 +37,7 @@ export class MockAIProvider implements AIProvider {
     return {
       text,
       sources: context.map((c) => c.articleId),
-      citations: context.map((c) => ({
+      citations: context.filter((c) => c.sourceType !== 'inventory').map((c) => ({
         authorizationId: c.authorizationId ?? 0,
         chunkIndex: c.chunkIndex ?? 0,
       })),

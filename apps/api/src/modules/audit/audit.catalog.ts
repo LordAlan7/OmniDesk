@@ -47,6 +47,7 @@ export const AUDIT_EVENTS = {
   'ticket.priority_changed': event('ticket', 'tickets', 'Cambio de prioridad.', { historyAction: 'priority_changed' }),
   'ticket.category_changed': event('ticket', 'tickets', 'Cambio de categoría.', { historyAction: 'category_changed' }),
   'ticket.business_info_updated': event('ticket', 'tickets', 'Cambio de tienda o modelo de motocicleta.', { historyAction: 'business_info_updated' }),
+  'ticket.vehicle_linked': event('ticket', 'tickets', 'Motocicleta del inventario vinculada, cambiada o desvinculada.', { historyAction: 'vehicle_linked' }),
   'ticket.deadline_changed': event('ticket', 'tickets', 'Plazo establecido, modificado o eliminado.', { historyAction: 'deadline_changed' }),
   'ticket.progress_update': event('ticket', 'tickets', 'Nota de avance registrada (el texto solo vive en TicketHistory).', {
     historyAction: 'progress_update',

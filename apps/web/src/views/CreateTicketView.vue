@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { ApiError } from '../services/api'
 import { suggestTicketFields, type TicketSuggestion } from '../services/aiAssistant'
 import {
@@ -109,6 +109,28 @@ async function focusFirstError() {
   firstInvalid?.focus()
 }
 
+// Paso 10: prellenado desde la consulta de inventario (/tickets/new?vin=…&model=…).
+const route = useRoute()
+
+/** §10: VIN de 17 caracteres alfanuméricos, sin I, O ni Q. */
+const VIN_PATTERN = /^[A-HJ-NPR-Z0-9]{17}$/
+
+/** VIN verificado en inventario; viaja en el payload y el backend guarda la copia mínima. */
+const vehicleVin = ref('')
+
+function prefillFromInventory(): void {
+  const vin = route.query.vin
+  const model = route.query.model
+
+  if (typeof vin === 'string' && VIN_PATTERN.test(vin.toUpperCase())) {
+    vehicleVin.value = vin.toUpperCase()
+  }
+
+  if (typeof model === 'string' && model.trim() !== '' && !form.motorcycleModel) {
+    form.motorcycleModel = model.trim()
+  }
+}
+
 // Limpiar el formulario
 function resetForm() {
   form.title = ''
@@ -116,6 +138,7 @@ function resetForm() {
   form.categoryId = 0
   form.storeLocation = ''
   form.motorcycleModel = ''
+  vehicleVin.value = ''
 
   clearErrors()
   aiSuggestion.value = null
@@ -193,6 +216,8 @@ async function submit() {
       categoryId: form.categoryId,
       storeLocation: form.storeLocation.trim(),
       motorcycleModel: form.motorcycleModel.trim(),
+      // Paso 10: se envía solo si la moto vino de la consulta de inventario.
+      vehicleVin: vehicleVin.value || undefined,
     }
 
     const response = await createTicket(payload)
@@ -239,8 +264,11 @@ async function submit() {
   }
 }
 
-// Cargar categorías al abrir la pantalla
-onMounted(loadCategories)
+// Cargar categorías y prellenar la motocicleta al abrir la pantalla
+onMounted(() => {
+  prefillFromInventory()
+  loadCategories()
+})
 </script>
 
 <template>
@@ -282,6 +310,22 @@ onMounted(loadCategories)
 
         <!-- Formulario principal -->
         <form v-else @submit.prevent="submit" novalidate>
+
+          <!-- Paso 10: motocicleta vinculada desde la consulta de inventario -->
+          <div v-if="vehicleVin" class="vin-chip" data-testid="prefilled-vin">
+            <span>
+              Motocicleta vinculada por VIN
+              <strong class="mono">{{ vehicleVin }}</strong>
+            </span>
+            <button
+              type="button"
+              class="chip-remove"
+              :disabled="saving"
+              @click="vehicleVin = ''"
+            >
+              Quitar
+            </button>
+          </div>
 
           <!-- Título -->
           <div class="form-group">
@@ -645,6 +689,49 @@ textarea {
   color: #4f46e5;
   margin: 20px 0;
   font-family: 'JetBrains Mono', monospace;
+}
+
+/* Paso 10: chip del VIN prellenado */
+.vin-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.vin-chip .mono {
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 4px;
+}
+
+.chip-remove {
+  background: transparent;
+  border: none;
+  color: #166534;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.chip-remove:focus-visible {
+  outline: 2px solid #166534;
+  outline-offset: 2px;
+}
+
+.chip-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Estilos específicos para la tarjeta de IA */

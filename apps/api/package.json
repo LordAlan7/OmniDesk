@@ -11,7 +11,8 @@
     "test": "jest",
     "seed-users": "tsx src/scripts/seed-users.ts",
     "create-admin": "tsx src/scripts/create-admin.ts",
-    "migrate:quotations": "tsx src/scripts/migrate-quotations.ts"
+    "migrate:quotations": "tsx src/scripts/migrate-quotations.ts",
+    "migrate": "tsx src/scripts/migrate.ts"
   },
   "dependencies": {
     "@neon/config": "^1.9.3",

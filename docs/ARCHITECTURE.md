@@ -11,7 +11,7 @@ auth ───────► users ───────► audit
 tickets ────► users, audit, notifications
 files ──────► tickets, audit
 knowledge ──► files, audit
-ai ─────────► knowledge, tickets, audit
+ai ─────────► audit (tickets, knowledge e inventory solo por puertos inyectados desde app.ts — paso 8)
 reports ────► tickets
 notifications, audit: sin dependencias de otros módulos
 ```
@@ -50,6 +50,7 @@ Reglas de propiedad de datos:
 - La **autorización** vive en `shared/authorization` (permisos y política) y la **trazabilidad** en `audit` (`recordAudit`). Los demás módulos las usan; no las reimplementan.
 - **Transacciones**: las controla el servicio del módulo que inicia la operación; el repositorio solo ejecuta dentro de la transacción recibida. Una operación que afecta a varios módulos se coordina desde el servicio del módulo que la origina, que llama a los demás por su `index.ts`.
 - **Inversión para romper ciclos**: `users` necesita saber si un técnico tiene tickets abiertos, pero no puede importar `tickets`. `app.ts` (raíz de composición) inyecta la comprobación con `configurePendingTicketsChecker`.
+- **Servicio de IA separable (paso 8)**: el módulo `ai` consume `tickets`, `knowledge` e `inventory` solo por los puertos de `modules/ai/ai.ports.ts`, que `app.ts` inyecta con `configureAiPorts`. Así el módulo puede extraerse como servicio independiente sustituyendo los adaptadores por clientes HTTP. Contrato completo: `modules/ai/README.md`.
 
 Estas reglas se **verifican automáticamente** en `apps/api/src/architecture.test.ts`: grafo declarado sin ciclos; imports entre módulos solo por `index.ts` y dependencias permitidas; rutas sin repositorios ni `pg`; `pg` solo en repositorios, `shared/db` y `scripts`; `process.env` solo en `config/env.ts`; `shared/` sin dependencias de módulos.
 

@@ -1,7 +1,7 @@
 import { can, PERMISSIONS } from '../../../shared/authorization';
 import { Errors } from '../../../shared/errors';
 import type { AuthUser } from '../../../shared/types';
-import { getTicketForUser } from '../../tickets';
+import { getTicketForUser } from '../ai.ports';
 
 /**
  * Contexto de ticket para el asistente (AIR-008).

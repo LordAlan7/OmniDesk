@@ -31,7 +31,7 @@ import type {
 
 import type {
   KnowledgeSourceSnapshot,
-} from '../knowledge';
+} from './sources/sources.types';
 
 /**
  * NFR-003 + AIR-006 + FR-015
@@ -138,7 +138,7 @@ describe(
     function mockTicketAccess() {
       return jest
         .spyOn(
-          require('../tickets/tickets.service'),
+          require('../ai.ports'),
           'getTicketForUser',
         )
         .mockResolvedValue({

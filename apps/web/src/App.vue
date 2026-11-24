@@ -160,6 +160,25 @@ onUnmounted(() => {
             Tickets
           </RouterLink>
 
+          <!-- Paso 10: consulta de motocicleta por VIN (inventario, solo lectura). -->
+          <RouterLink
+            v-if="session.can('inventory:read')"
+            :to="{ name: 'inventory-vehicle' }"
+            data-testid="nav-inventory"
+            @click="closeMenu"
+          >
+            Inventario
+          </RouterLink>
+
+          <RouterLink
+            v-if="session.can('inventory:read')"
+            :to="{ name: 'inventory-parts' }"
+            data-testid="nav-parts"
+            @click="closeMenu"
+          >
+            Refacciones
+          </RouterLink>
+
           <!-- Administración de usuarios -->
           <RouterLink
             v-if="session.can('users:create')"

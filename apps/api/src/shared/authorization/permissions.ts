@@ -42,6 +42,8 @@ export const PERMISSIONS = {
   AI_SOURCES_REVIEW: 'ai:sources:review',
   // AIR-008: usar el asistente no da acceso a tickets, a conversaciones ajenas ni a aplicar resultados.
   AI_CONTEXT_TICKETS: 'ai:context:tickets',
+  // Paso 7: usar el asistente no da acceso a inventario; se concede aparte.
+  AI_CONTEXT_INVENTORY: 'ai:context:inventory',
   AI_INTERACTIONS_READ: 'ai:interactions:read',
   AI_APPLY: 'ai:apply',
 

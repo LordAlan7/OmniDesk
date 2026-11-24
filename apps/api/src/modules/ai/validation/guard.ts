@@ -6,7 +6,7 @@ import type { AuthUser } from '../../../shared/types';
 import * as validationsService from './validations.service';
 import type { DestinationType } from './validations.types';
 
-import { getTicketForUser } from '../../tickets/tickets.service';
+import { getTicketForUser } from '../ai.ports';
 
 import { interactionsService } from '../interactions/interactions.service';
 import { assertInteractionCurrentlySupported } from '../interactions/interactions';

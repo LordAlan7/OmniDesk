@@ -123,6 +123,8 @@ export interface ReportTicketFilters {
   status?: string;
   priorityId?: number;
   technicianId?: number;
+  vehicleVin?: string;
+  vehicleModelId?: string;
   from?: string;
   to?: string;
   limit: number;
@@ -137,6 +139,10 @@ export interface ReportTicket {
   technicianId: number | null;
   createdAt: string;
   dueDate: string | null;
+  vehicleVin: string | null;
+  vehicleBrand: string | null;
+  vehicleModel: string | null;
+  vehicleYear: number | null;
 }
 
 export interface ReportTicketsResult {
@@ -177,6 +183,18 @@ export async function getReportTickets(
     );
   }
 
+  if (filters.vehicleVin) {
+    conditions.push(
+      `t.vehicle_vin = ${parameter(filters.vehicleVin)}`
+    );
+  }
+
+  if (filters.vehicleModelId) {
+    conditions.push(
+      `t.vehicle_model_id = ${parameter(filters.vehicleModelId)}`
+    );
+  }
+
   if (filters.from) {
     conditions.push(
       `t.created_at >= (${parameter(filters.from)}::date AT TIME ZONE 'America/Monterrey')`
@@ -205,7 +223,11 @@ export async function getReportTickets(
         t.priority_id,
         t.assigned_technician_id,
         t.created_at,
-        t.due_date
+        t.due_date,
+        t.vehicle_vin,
+        t.vehicle_brand,
+        t.vehicle_model,
+        t.vehicle_year
       FROM tickets t
       ${whereClause}
     ),
@@ -228,7 +250,11 @@ export async function getReportTickets(
               'priorityId', p.priority_id,
               'technicianId', p.assigned_technician_id,
               'createdAt', p.created_at,
-              'dueDate', p.due_date
+              'dueDate', p.due_date,
+              'vehicleVin', p.vehicle_vin,
+              'vehicleBrand', p.vehicle_brand,
+              'vehicleModel', p.vehicle_model,
+              'vehicleYear', p.vehicle_year
             )
             ORDER BY p.created_at DESC, p.id DESC
           )
