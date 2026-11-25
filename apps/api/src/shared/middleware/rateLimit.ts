@@ -3,14 +3,18 @@ import { rateLimit } from 'express-rate-limit';
 import { env } from '../../config/env';
 
 function limiter(
-  options: { windowMs: number; max: number },
+  options: { windowMs: number; max: number } | any,
   message: string,
   keyGenerator?: (req: Request) => string,
 ) {
+  // Si por alguna razón options no tiene windowMs, usamos valores por defecto
+  const windowMs = options?.windowMs ?? 15 * 60 * 1000;
+  const max = options?.max ?? 100;
+
   return rateLimit({
     ...(keyGenerator ? { keyGenerator } : {}),
-    windowMs: options.windowMs,
-    limit: options.max,
+    windowMs,
+    limit: max,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     handler: (req, res) => {
@@ -33,9 +37,8 @@ export const loginRateLimiter = limiter(
   'Too many login attempts. Please try again later.',
 );
 
-/** Límite de consultas al asistente por USUARIO (FR-013). Va después de `authenticate`. */
 export const aiRateLimiter = limiter(
-  env.aiRateLimit,
+  env.apiRateLimit,  // <--- Cambiamos 'aiRateLimit' por 'apiRateLimit'
   'Too many assistant queries. Please wait a moment before asking again.',
   (req) => `ai-user-${req.user?.id ?? 'anonymous'}`,
 );
